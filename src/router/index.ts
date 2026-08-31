@@ -4,6 +4,7 @@ import { Board } from '../pages/board'
 import { Launch } from '../pages/launch'
 import { Prelaunch } from '../pages/prelaunch'
 import { Me } from '../pages/me'
+import { Dashboard } from '@/pages/dashboard'
 
 export const router = createBrowserRouter([
   {
@@ -29,6 +30,10 @@ export const router = createBrowserRouter([
       {
         path: 'me',
         Component: Me,
+      },
+      {
+        path: 'dashboard',
+        Component: Dashboard,
       },
     ],
   },

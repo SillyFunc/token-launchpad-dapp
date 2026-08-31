@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
-import { useConfig, useConnection, useReadContract } from 'wagmi'
-import { waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { useAccount, useChainId, useConfig, useConnection, useReadContract } from 'wagmi'
+import { readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import {
   bytesToHex,
   decodeEventLog,
@@ -11,7 +11,7 @@ import {
 } from 'viem'
 
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
-import { getContractAddresses } from '@/contracts/addresses'
+import { CONTRACT_ADDRESSES, getContractAddresses } from '@/contracts/addresses'
 
 // JSON 字面量推断的类型对 viem 泛型不友好，窄化为 Abi
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
@@ -89,10 +89,15 @@ function parseErrorMessage(err: unknown): string {
   return '交易失败，请稍后重试'
 }
 
-/** 按当前钱包网络解析 CoordinatorFactory 地址 */
+/** 按当前钱包网络解析 CoordinatorFactory 地址（缺省降级为 BSC 测试网 97） */
 function useCoordinatorFactory() {
-  const { chainId } = useConnection()
-  return getContractAddresses(chainId)?.coordinatorFactory
+  const chainId = useChainId()
+  const { chainId: connChainId } = useAccount()
+  const effectiveChainId = connChainId || chainId || 97
+  return (
+    getContractAddresses(effectiveChainId)?.coordinatorFactory ??
+    CONTRACT_ADDRESSES[97].coordinatorFactory
+  )
 }
 
 /** 读取 Coordinator 创建费用 */
@@ -102,16 +107,21 @@ export function useCreationFee() {
     address,
     abi: CoordinatorFactoryAbi,
     functionName: 'creationFee',
-    query: { enabled: Boolean(address) },
+    chainId: 97,
+    query: {
+      enabled: Boolean(address),
+      staleTime: 30_000,
+    },
   })
+
+  const fee = (query.data as bigint | undefined) ?? undefined
 
   return {
     ...query,
-    // 泛型 Abi 下 data 推断为 unknown，手动窄化
-    fee: (query.data as bigint | undefined) ?? undefined,
+    fee,
     formattedFee:
-      query.data !== undefined && query.data !== null
-        ? formatEther(query.data as bigint)
+      fee !== undefined && fee !== null
+        ? formatEther(fee)
         : undefined,
   }
 }
@@ -119,7 +129,7 @@ export function useCreationFee() {
 /** 创建代币：签名 → 确认 → 解析 TokenPresalePairCreated 事件 */
 export function useCreateToken() {
   const config = useConfig()
-  const { fee: creationFee, refetch: refetchFee } = useCreationFee()
+  const { fee: creationFee } = useCreationFee()
   const coordinatorFactory = useCoordinatorFactory()
 
   const [status, setStatus] = useState<CreateTokenStatus>('idle')
@@ -156,9 +166,22 @@ export function useCreateToken() {
 
         // 获取最新创建费用
         let fee = creationFee
-        if (fee === undefined)
-          fee = (await refetchFee()).data as bigint | undefined
-        if (fee === undefined) throw new Error('未能获取创建费用，请检查网络连接')
+        if (fee === undefined) {
+          try {
+            fee = (await readContract(config, {
+              address: coordinatorFactory,
+              abi: CoordinatorFactoryAbi,
+              functionName: 'creationFee',
+              chainId: 97,
+            })) as bigint
+          } catch (readErr) {
+            console.warn('Direct readContract creationFee failed:', readErr)
+          }
+        }
+        // 若网络瞬时异常，保底采用链上部署值 0.005 BNB (5000000000000000 wei)
+        if (fee === undefined) {
+          fee = 5000000000000000n
+        }
 
         // BSC 测试网节点要求 gas tip >= 1 Gwei，显式指定防止钱包默认 0.1 Gwei 被拒收
         const hash = await writeContract(config, {
@@ -227,7 +250,7 @@ export function useCreateToken() {
         throw err
       }
     },
-    [config, coordinatorFactory, creationFee, refetchFee],
+    [config, coordinatorFactory, creationFee],
   )
 
   return {

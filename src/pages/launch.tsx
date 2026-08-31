@@ -3,13 +3,16 @@ import { Link } from 'react-router'
 import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
 import { isAddress, type Hex } from 'viem'
-import { useConnection } from 'wagmi'
+import { useConfig, useConnection } from 'wagmi'
+import { signMessage } from '@wagmi/core'
 import { Loader2, ExternalLink, ArrowRight } from 'lucide-react'
 
 import { useCreateToken, useCreationFee } from '@/hooks/use-coordinator'
 import { NumericInput } from '@/components/ui/numeric-keypad'
 import sectionIcon from '@/assets/icons/section-title-icon.svg'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
+import { saveTokenInfo, uploadTokenLogo } from '@/api/token'
+import { getSignMessage } from '@/api/auth'
 
 const optionalUrl = z.union([
   z.literal(''),
@@ -54,9 +57,6 @@ const evmAddressSchema = z
 const linkFields = [
   { label: 'Telegram 链接', key: 'telegram' },
   { label: 'Twitter 链接', key: 'twitter' },
-  { label: 'GitHub 链接', key: 'github' },
-  { label: 'YouTube 链接', key: 'youtube' },
-  { label: 'DeBox 链接', key: 'debox' },
   { label: '网站链接', key: 'website' },
 ] as const
 
@@ -136,8 +136,19 @@ function TaxSlider({ label, value, onChange }: TaxSliderProps) {
 
 export const Launch = () => {
   const { address } = useConnection()
+  const config = useConfig()
+  const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [logoError, setLogoError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 预览用 objectURL，组件卸载时释放
+  useEffect(
+    () => () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview)
+    },
+    [logoPreview],
+  )
 
   // 链上状态与方法
   const { formattedFee } = useCreationFee()
@@ -166,24 +177,48 @@ export const Launch = () => {
       links: {
         telegram: '',
         twitter: '',
-        github: '',
-        youtube: '',
-        debox: '',
         website: '',
       },
     },
     onSubmit: async ({ value }) => {
+      if (!logoFile) {
+        setLogoError('请上传代币 Logo')
+        return
+      }
+      if (!address) return
       try {
-        await createToken({
+        const message = await getSignMessage(address)
+        const signature = await signMessage(config, { message })
+        const coinImg = await uploadTokenLogo(logoFile)
+        await saveTokenInfo({
           name: value.name,
+          coinImg,
           symbol: value.symbol,
           meta: value.description,
           buyTax: value.buyTax,
           sellTax: value.sellTax,
-          feeRecipient: value.feeRecipient as Hex,
-          taxDurationDays: Number(value.taxDuration),
-          antiFarmerDurationDays: Number(value.antiFarmerDuration),
+          feeRecipient: value.feeRecipient,
+          taxDuration: Number(value.taxDuration),
+          antiFarmerDuration: Number(value.antiFarmerDuration),
+          liqExpectedOutputAmount: 0,
+          launchType: 2,
+          website: value.links.website ?? '',
+          telegram: value.links.telegram ?? '',
+          twitter: value.links.twitter ?? '',
+          address,
+          message,
+          signature,
         })
+        // await createToken({
+        //   name: value.name,
+        //   symbol: value.symbol,
+        //   meta: value.description,
+        //   buyTax: value.buyTax,
+        //   sellTax: value.sellTax,
+        //   feeRecipient: value.feeRecipient as Hex,
+        //   taxDurationDays: Number(value.taxDuration),
+        //   antiFarmerDurationDays: Number(value.antiFarmerDuration),
+        // })
       } catch {
         // 错误已通过 hook 的 error 状态展示
       }
@@ -191,18 +226,23 @@ export const Launch = () => {
   })
 
   // 钱包连接状态变化且表单尚未填入地址时，自动回显钱包地址
-  useEffect(() => {
-    if (address && !form.getFieldValue('feeRecipient')) {
-      form.setFieldValue('feeRecipient', address)
-    }
-  }, [address, form])
+  // useEffect(() => {
+  //   if (address && !form.getFieldValue('feeRecipient')) {
+  //     form.setFieldValue('feeRecipient', address)
+  //   }
+  // }, [address, form])
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const url = URL.createObjectURL(file)
-      setLogoPreview(url)
+    if (!file) return
+    if (file.size > 3 * 1024 * 1024) {
+      setLogoError('文件大小不能超过 3 MB')
+      return
     }
+    setLogoError('')
+    if (logoPreview) URL.revokeObjectURL(logoPreview)
+    setLogoFile(file)
+    setLogoPreview(URL.createObjectURL(file))
   }
 
   return (
@@ -346,6 +386,11 @@ export const Launch = () => {
                   <br />
                   限制 3&nbsp;MB
                 </span>
+                {logoError && (
+                  <p className="mt-2 text-xs text-red-500" role="alert">
+                    {logoError}
+                  </p>
+                )}
               </div>
             </div>
 

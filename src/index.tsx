@@ -6,6 +6,8 @@ import { router } from '@/router'
 import { Web3Provider } from '@/providers/web3-provider'
 import './index.css'
 
+document.documentElement.classList.add('dark')
+
 const rootEl = document.getElementById('root')
 if (rootEl) {
   const root = ReactDOM.createRoot(rootEl)
