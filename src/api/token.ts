@@ -129,9 +129,23 @@ export function saveTokenInfo(
   return post<void>('deposit/exSwap/swapCoinIssuedAdd', data, config)
 }
 
+export function updateTokenInfo(
+  data: { id: number | string } & SaveTokenData,
+  config?: AxiosRequestConfig,
+): Promise<void> {
+  return post<void>(
+    'deposit/exSwap/swapCoinIssuedUpdateCoinssued',
+    data,
+    config,
+  )
+}
+
 export interface ParseTxHashData {
   id: number | string
   hash: string
+  address: string
+  message: string
+  signature: string
 }
 
 export function parseTxHash(
@@ -145,9 +159,5 @@ export function getTokensByCreator(
   address: string,
   config?: AxiosRequestConfig,
 ) {
-  return post<TokenDetail[]>(
-    'deposit/exSwap/swapIssuedList',
-    { address },
-    config,
-  )
+  return post<any[]>('deposit/exSwap/swapIssuedList', { address }, config)
 }

@@ -6,7 +6,8 @@ export default defineConfig([
   {
     rules: {
       // customize rules here
-      '@typescript-eslint/no-unused-vars': 'warn'
+      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off'
     },
   },
 ]);

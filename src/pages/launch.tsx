@@ -2,12 +2,12 @@ import { useEffect, useState, useRef, type ChangeEvent } from 'react'
 import { Link } from 'react-router'
 import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
-import { isAddress, type Hex } from 'viem'
+import { isAddress } from 'viem'
 import { useConfig, useConnection } from 'wagmi'
 import { signMessage } from '@wagmi/core'
 import { Loader2, ExternalLink, ArrowRight } from 'lucide-react'
 
-import { useCreateToken, useCreationFee } from '@/hooks/use-coordinator'
+import { type CreateTokenResult } from '@/hooks/use-coordinator'
 import { NumericInput } from '@/components/ui/numeric-keypad'
 import sectionIcon from '@/assets/icons/section-title-icon.svg'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
@@ -150,18 +150,10 @@ export const Launch = () => {
     [logoPreview],
   )
 
-  // 链上状态与方法
-  const { formattedFee } = useCreationFee()
-  const {
-    execute: createToken,
-    isLoading: isTxLoading,
-    isSigning,
-    isConfirming,
-    isSuccess,
-    tokenAddress,
-    txHash,
-    error: txError,
-  } = useCreateToken()
+  // 链上状态与方法（createToken 在实际启用链上创建时会再次接入）
+  const [isTxLoading] = useState(false)
+  const [txResult] = useState<CreateTokenResult | null>(null)
+  const [txError] = useState('')
 
   // 表单状态管理
   const form = useForm({
@@ -721,62 +713,39 @@ export const Launch = () => {
         >
           {({ canSubmit, isSubmitting }) => (
             <>
-              {formattedFee && (
-                <div className="mb-2 flex items-center justify-between text-xs text-neutral-400">
-                  <span>创建费用：</span>
-                  <span className="font-semibold text-white">
-                    {formattedFee} BNB
-                  </span>
-                </div>
-              )}
-
               {txError && (
                 <p className="mb-2 text-xs text-red-500 font-medium">
                   {txError}
                 </p>
               )}
 
-              {isSuccess && tokenAddress && (
+              {txResult?.tokenAddress && (
                 <div className="mb-3 rounded border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-400">
                   <p className="font-semibold mb-1">🎉 代币创建成功！</p>
                   <div className="flex items-center gap-1">
                     <span>代币地址：</span>
                     <a
-                      href={`https://testnet.bscscan.com/address/${tokenAddress}`}
+                      href={`https://testnet.bscscan.com/address/${txResult.tokenAddress}`}
                       target="_blank"
                       rel="noreferrer"
                       className="underline inline-flex items-center gap-0.5 font-mono text-white hover:text-[#FFA546]"
                     >
-                      {tokenAddress}
+                      {txResult.tokenAddress}
                       <ExternalLink className="size-3" />
                     </a>
                   </div>
-                  {txHash && (
-                    <div className="flex items-center gap-1 mt-1 text-neutral-400">
-                      <span>交易哈希：</span>
-                      <a
-                        href={`https://testnet.bscscan.com/tx/${txHash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline inline-flex items-center gap-0.5 font-mono hover:text-white"
-                      >
-                        {txHash.slice(0, 10)}...{txHash.slice(-8)}
-                      </a>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1 mt-1 text-neutral-400">
+                    <span>交易哈希：</span>
+                    <a
+                      href={`https://testnet.bscscan.com/tx/${txResult.txHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline inline-flex items-center gap-0.5 font-mono hover:text-white"
+                    >
+                      {txResult.txHash.slice(0, 10)}...{txResult.txHash.slice(-8)}
+                    </a>
+                  </div>
                 </div>
-              )}
-
-              {isSigning && (
-                <p className="mb-2 text-xs text-[#FFA546]">
-                  请在钱包中确认签名…
-                </p>
-              )}
-
-              {isConfirming && (
-                <p className="mb-2 text-xs text-[#FFA546]">
-                  交易已提交，等待区块确认中…
-                </p>
               )}
 
               {!address && (
@@ -793,13 +762,7 @@ export const Launch = () => {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="size-5 animate-spin" />
-                    <span>
-                      {isSigning
-                        ? '等待钱包确认…'
-                        : isConfirming
-                          ? '区块确认中…'
-                          : '创建中…'}
-                    </span>
+                    <span>创建中…</span>
                   </>
                 ) : (
                   <span>创建代币</span>
