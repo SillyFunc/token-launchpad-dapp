@@ -286,7 +286,7 @@ export const Launch = () => {
           <div className="flex flex-col gap-6">
             <SectionHeader title="基本信息" />
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -566,10 +566,7 @@ export const Launch = () => {
             <SectionHeader title="税费接收地址" required />
             <form.Field
               name="feeRecipient"
-              validators={{
-                onMount: evmAddressSchema,
-                onChange: evmAddressSchema,
-              }}
+              validators={{ onChange: evmAddressSchema }}
             >
               {(field) => {
                 const errorMsg = field.state.meta.errors
@@ -580,10 +577,6 @@ export const Launch = () => {
                   )
                   .filter((m): m is string => typeof m === 'string')
                   .join(', ')
-                const showError =
-                  Boolean(errorMsg) &&
-                  (field.state.meta.isTouched ||
-                    field.state.value.trim().length > 0)
 
                 return (
                   <div className="flex flex-col">
@@ -600,7 +593,7 @@ export const Launch = () => {
                       onChange={(e) => field.handleChange(e.target.value)}
                       className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                     />
-                    {showError && (
+                    {errorMsg && (
                       <p className="text-xs text-red-500 mt-1">{errorMsg}</p>
                     )}
                   </div>

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { useConnection } from 'wagmi'
+import { useConnection, useReadContract } from 'wagmi'
+import { formatUnits, zeroAddress, type Abi } from 'viem'
 import { ConnectKitButton } from 'connectkit'
 import {
   Coins,
@@ -9,6 +10,7 @@ import {
   Check,
   ExternalLink,
   Edit3,
+  Gift,
   Rocket,
   RefreshCw,
   Globe,
@@ -32,7 +34,15 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { EditTokenModal } from '@/components/dashboard/edit-token-modal'
 import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
+import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
+import PresaleAbiJson from '@/contracts/abi/Presale.json'
+import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
+
+const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
+const PresaleAbi = PresaleAbiJson as unknown as Abi
+const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
 function TwitterIcon({ className }: { className?: string }) {
   return (
@@ -53,20 +63,72 @@ function formatAddress(addr?: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
+/** 紧凑中文单位：1234567890 → 12.35亿，56700 → 5.67万 */
+const totalSupplyFormatter = new Intl.NumberFormat('zh-CN', {
+  notation: 'compact',
+  maximumFractionDigits: 2,
+})
+
+function formatTotalSupply(supply: bigint): string {
+  return totalSupplyFormatter.format(Number(formatUnits(supply, 18)))
+}
+
 function TokenCard({
   token,
+  totalSupplyText,
   onEdit,
   onPresale,
   onLaunch,
+  onClaim,
 }: {
   token: TokenDetail
+  totalSupplyText: string
   onEdit: (token: TokenDetail) => void
   onPresale: (token: TokenDetail) => void
   onLaunch: (token: TokenDetail) => void
+  onClaim: (token: TokenDetail) => void
 }) {
+  const { address: connectedAddress } = useConnection()
   const [copied, setCopied] = useState(false)
   const isIssued = Boolean(token.coinContractAddress)
   const tokenAddress = token.coinContractAddress || ''
+
+  // 代币地址 → 预售合约
+  const presaleAddress = useReadContract({
+    address: CONTRACT_ADDRESSES[97].coordinatorFactory,
+    abi: CoordinatorFactoryAbi,
+    functionName: 'getTokenPresale',
+    args: [tokenAddress as `0x${string}`],
+    chainId: 97,
+    query: { enabled: isIssued, staleTime: 30_000 },
+  }).data as `0x${string}` | undefined
+  const presaleExists = Boolean(presaleAddress && presaleAddress !== zeroAddress)
+
+  // 预售未启用且代币未被领取，且当前钱包是预售 owner，才可领取
+  const launchStatus = useReadContract({
+    address: presaleAddress && presaleExists ? presaleAddress : undefined,
+    abi: PresaleAbi,
+    functionName: 'getLaunchStatus',
+    chainId: 97,
+    query: { enabled: presaleExists, staleTime: 30_000 },
+  }).data as
+    | readonly [boolean, bigint, bigint, bigint, boolean, boolean]
+    | undefined
+  const presaleOwner = useReadContract({
+    address: presaleAddress && presaleExists ? presaleAddress : undefined,
+    abi: PresaleAbi,
+    functionName: 'owner',
+    chainId: 97,
+    query: { enabled: presaleExists, staleTime: 30_000 },
+  }).data as `0x${string}` | undefined
+
+  const showClaimButton = Boolean(
+    presaleExists &&
+      launchStatus &&
+      !launchStatus[0] && // enabled
+      !launchStatus[5] && // tokensClaimed
+      presaleOwner === connectedAddress, // isCreator
+  )
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -192,9 +254,7 @@ function TokenCard({
                     : 'font-normal text-neutral-400'
                 }
               >
-                {token.coinContractAddress
-                  ? (token.totalIssuance ?? token.totalSupply ?? '10 亿')
-                  : '暂未发行'}
+                {token.coinContractAddress ? totalSupplyText : '暂未发行'}
               </span>
             </div>
 
@@ -252,26 +312,42 @@ function TokenCard({
 
       {/* 卡片操作按钮 */}
       <CardFooter className="flex items-center justify-end gap-2.5 border-t border-[#2F3737] bg-[#16181a] p-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onEdit(token)}
-          className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
-        >
-          <Edit3 className="size-3.5" />
-          编辑信息
-        </Button>
-        {isIssued ? (
+        {!isIssued && (
           <Button
             type="button"
+            variant="outline"
             size="sm"
-            onClick={() => onPresale(token)}
-            className="cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+            onClick={() => onEdit(token)}
+            className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
           >
-            <Rocket className="size-3.5" />
-            我要预售
+            <Edit3 className="size-3.5" />
+            编辑信息
           </Button>
+        )}
+        {isIssued ? (
+          <>
+            {showClaimButton && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onClaim(token)}
+                className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
+              >
+                <Gift className="size-3.5" />
+                领取代币
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onPresale(token)}
+              className="cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+            >
+              <Rocket className="size-3.5" />
+              我要预售
+            </Button>
+          </>
         ) : (
           <Button
             type="button"
@@ -308,6 +384,23 @@ export const Dashboard = () => {
 
   const tokenList = Array.isArray(tokens) ? tokens : []
 
+  // 所有代币发行总量固定，取任意一张已发行代币合约读一次 totalSupply 共用
+  const firstIssued = tokenList.find((t) => t.coinContractAddress)
+  const totalSupplyData = useReadContract({
+    address: firstIssued?.coinContractAddress as `0x${string}` | undefined,
+    abi: FlapTaxTokenV3Abi,
+    functionName: 'totalSupply',
+    chainId: 97,
+    query: {
+      enabled: Boolean(firstIssued),
+      staleTime: Infinity,
+    },
+  }).data as bigint | undefined
+  const totalSupplyText =
+    totalSupplyData !== undefined && totalSupplyData !== null
+      ? formatTotalSupply(totalSupplyData)
+      : '--'
+
   const handlePresale = (token: TokenDetail) => {
     const tokenAddr = token.coinContractAddress || ''
     navigate(`/prelaunch?address=${tokenAddr}`)
@@ -315,6 +408,11 @@ export const Dashboard = () => {
 
   const handleLaunch = (token: TokenDetail) => {
     setIssuingToken(token)
+  }
+
+  // 领取代币：具体逻辑后续实现
+  const handleClaim = (_token: TokenDetail) => {
+    // TODO: 领取代币逻辑
   }
 
   return (
@@ -454,9 +552,11 @@ export const Dashboard = () => {
             <TokenCard
               key={token.id || token.coinContractAddress}
               token={token}
+              totalSupplyText={totalSupplyText}
               onEdit={(t) => setEditingToken(t)}
               onPresale={handlePresale}
               onLaunch={handleLaunch}
+              onClaim={handleClaim}
             />
           ))}
         </div>
