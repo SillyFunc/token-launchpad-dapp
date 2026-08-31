@@ -4,7 +4,7 @@ import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
 import { isAddress, type Hex } from 'viem'
 import { useConnection } from 'wagmi'
-import { Loader2, ExternalLink } from 'lucide-react'
+import { Loader2, ExternalLink, ArrowRight } from 'lucide-react'
 
 import { useCreateToken, useCreationFee } from '@/hooks/use-coordinator'
 import { NumericInput } from '@/components/ui/numeric-keypad'
@@ -240,15 +240,16 @@ export const Launch = () => {
             <div className="text-xs font-bold text-white">
               保留您的代币 CA
             </div>
-            <div className="mt-0.5 text-xs text-neutral-500">
+            <div className="mt-1.5 text-xs text-neutral-500">
               在发布前锁定您的代币合约的地址。
             </div>
           </div>
           <Link
             to="/prelaunch"
-            className="flex items-center justify-center rounded border border-[#FE810B] px-2.5 py-1.5 text-xs font-bold text-[#FE810B] transition-colors hover:bg-[#FE810B]/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
+            className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
           >
-            保留 CA →
+            保留 CA
+            <ArrowRight className='size-3 ml-1.5' />
           </Link>
         </div>
 
