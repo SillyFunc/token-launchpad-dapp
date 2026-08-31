@@ -16,3 +16,4 @@ dist/
 .idea
 
 .env
+.mcp.json
