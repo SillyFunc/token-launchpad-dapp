@@ -8,9 +8,8 @@ import { Loader2, ExternalLink, ArrowRight } from 'lucide-react'
 
 import { useCreateToken, useCreationFee } from '@/hooks/use-coordinator'
 import { NumericInput } from '@/components/ui/numeric-keypad'
-import sectionIcon from '../assets/icons/section-title-icon.svg'
-import uploadIcon from '../assets/upload-icon.svg'
-import titleBackArrow from '../assets/icons/back-arrow.svg'
+import sectionIcon from '@/assets/icons/section-title-icon.svg'
+import titleBackArrow from '@/assets/icons/back-arrow.svg'
 
 const optionalUrl = z.union([
   z.literal(''),
@@ -237,9 +236,7 @@ export const Launch = () => {
       <div className="flex flex-col rounded border border-[#484b51] bg-[#131516]">
         <div className="flex items-center justify-between border-b border-b-[#484b51] p-4">
           <div>
-            <div className="text-xs font-bold text-white">
-              保留您的代币 CA
-            </div>
+            <div className="text-xs font-bold text-white">保留您的代币 CA</div>
             <div className="mt-1.5 text-xs text-neutral-500">
               在发布前锁定您的代币合约的地址。
             </div>
@@ -249,7 +246,7 @@ export const Launch = () => {
             className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
           >
             保留 CA
-            <ArrowRight className='size-3 ml-1.5' />
+            <ArrowRight className="size-3 ml-1.5" />
           </Link>
         </div>
 
@@ -269,7 +266,7 @@ export const Launch = () => {
                 type="button"
                 aria-label="上传代币 Logo"
                 onClick={() => fileInputRef.current?.click()}
-                className="group relative flex h-20 w-20 shrink-0 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed border-neutral-700 bg-[#111111] transition-colors hover:border-[#FE810B] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
+                className="group text-[#84888c] hover:text-white transition-colors relative isolate flex h-25 w-25 shrink-0 cursor-pointer flex-col items-center justify-center"
               >
                 {logoPreview ? (
                   <img
@@ -280,14 +277,64 @@ export const Launch = () => {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <img
-                    src={uploadIcon}
-                    alt=""
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 200 200"
+                    fill="none"
+                    preserveAspectRatio="none"
                     aria-hidden="true"
-                    width={28}
-                    height={28}
-                    className="h-7 w-7 opacity-70 transition-opacity group-hover:opacity-100"
-                  />
+                    className="absolute inset-0 -z-10"
+                  >
+                    <rect
+                      x="0.5"
+                      y="0.5"
+                      width="199"
+                      height="199"
+                      rx="3.5"
+                      stroke="currentColor"
+                    ></rect>
+                    <path
+                      d="M12 172L12 188L28 188"
+                      stroke="currentColor"
+                    ></path>
+                    <path
+                      d="M172 188L188 188L188 172"
+                      stroke="currentColor"
+                    ></path>
+                    <path d="M28 12L12 12L12 28" stroke="currentColor"></path>
+                    <path
+                      d="M188 28L188 12L172 12"
+                      stroke="currentColor"
+                    ></path>
+                    <path
+                      d="M94.3333 130H76.6667C74.8986 130 73.2029 129.298 71.9526 128.047C70.7024 126.797 70 125.101 70 123.333V76.6667C70 74.8986 70.7024 73.2029 71.9526 71.9526C73.2029 70.7024 74.8986 70 76.6667 70H123.333C125.101 70 126.797 70.7024 128.047 71.9526C129.298 73.2029 130 74.8986 130 76.6667V110L119.667 99.6667C118.412 98.4373 116.723 97.7525 114.967 97.7613C113.211 97.77 111.529 98.4715 110.287 99.7133L80 130"
+                      stroke="#FE810B"
+                      stroke-width="1.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    ></path>
+                    <path
+                      d="M106.668 125L116.668 115L126.668 125"
+                      stroke="#FE810B"
+                      stroke-width="1.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    ></path>
+                    <path
+                      d="M116.668 133.333V115"
+                      stroke="#FE810B"
+                      stroke-width="1.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    ></path>
+                    <path
+                      d="M89.9987 96.6668C93.6806 96.6668 96.6654 93.6821 96.6654 90.0002C96.6654 86.3183 93.6806 83.3335 89.9987 83.3335C86.3168 83.3335 83.332 86.3183 83.332 90.0002C83.332 93.6821 86.3168 96.6668 89.9987 96.6668Z"
+                      stroke="#FE810B"
+                      stroke-width="1.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    ></path>
+                  </svg>
                 )}
               </button>
               <div className="flex flex-col">
@@ -295,7 +342,9 @@ export const Launch = () => {
                   // 支持的文件格式
                 </span>
                 <span className="mt-4 text-xs leading-relaxed text-[#a0a3a7]">
-                  PNG、JPEG、SVG、GIF、文件大小<br />限制 3&nbsp;MB
+                  PNG、JPEG、SVG、GIF、文件大小
+                  <br />
+                  限制 3&nbsp;MB
                 </span>
               </div>
             </div>
@@ -307,10 +356,7 @@ export const Launch = () => {
               {(field) => (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-0.5">
-                    <label
-                      htmlFor={field.name}
-                      className="text-sm text-white"
-                    >
+                    <label htmlFor={field.name} className="text-sm text-white">
                       代币名称
                     </label>
                     <span className="text-xs text-[#f7594b]">*</span>
@@ -341,10 +387,7 @@ export const Launch = () => {
               {(field) => (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-0.5">
-                    <label
-                      htmlFor={field.name}
-                      className="text-sm text-white"
-                    >
+                    <label htmlFor={field.name} className="text-sm text-white">
                       代币符號
                     </label>
                     <span className="text-xs text-[#f7594b]">*</span>
