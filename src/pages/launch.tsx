@@ -291,11 +291,11 @@ export const Launch = () => {
                 )}
               </button>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-[#FB5F16]">
+                <span className="text-sm font-bold text-[#FB5F16]">
                   // 支持的文件格式
                 </span>
-                <span className="mt-1 text-xs leading-relaxed text-neutral-500">
-                  PNG、JPEG、SVG、GIF、文件大小限制 3&nbsp;MB
+                <span className="mt-4 text-xs leading-relaxed text-[#a0a3a7]">
+                  PNG、JPEG、SVG、GIF、文件大小<br />限制 3&nbsp;MB
                 </span>
               </div>
             </div>
