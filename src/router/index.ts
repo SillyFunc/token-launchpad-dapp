@@ -1,7 +1,7 @@
 import { createBrowserRouter, redirect } from 'react-router'
 import { MainLayout } from '../layouts/main-layout'
 import { Board } from '../pages/board'
-import { Launch } from '../pages/launch'
+import { Launch } from '../pages/launch2'
 import { Prelaunch } from '../pages/prelaunch'
 import { Me } from '../pages/me'
 
