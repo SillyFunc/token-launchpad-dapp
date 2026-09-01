@@ -5,11 +5,12 @@ import { z } from 'zod'
 import { isAddress } from 'viem'
 import { useConfig, useConnection } from 'wagmi'
 import { signMessage } from '@wagmi/core'
-import { Loader2, ExternalLink, ArrowRight } from 'lucide-react'
+import { Loader2, ArrowRight } from 'lucide-react'
 
-import { type CreateTokenResult } from '@/hooks/use-coordinator'
+import { FormSectionTitle } from '@/components/common/form-section-title'
+import { TaxSlider } from '@/components/common/tax-slider'
 import { NumericInput } from '@/components/ui/numeric-keypad'
-import sectionIcon from '@/assets/icons/section-title-icon.svg'
+import { toast } from '@/components/ui/toast'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import { saveTokenInfo, uploadTokenLogo } from '@/api/token'
 import { getSignMessage } from '@/api/auth'
@@ -34,7 +35,7 @@ const symbolSchema = z
 const taxDurationSchema = z
   .string()
   .trim()
-  .min(1, '请输入税费存续期')
+  .min(1, '请输入收税时长')
   .refine((v) => {
     const n = Number(v)
     return v !== '' && Number.isInteger(n) && n >= 1 && n <= 365
@@ -60,86 +61,11 @@ const linkFields = [
   { label: '网站链接', key: 'website' },
 ] as const
 
-interface SectionHeaderProps {
-  title: string
-  required?: boolean
-}
-
-function SectionHeader({ title, required = false }: SectionHeaderProps) {
-  return (
-    <div className="flex items-center gap-2 relative">
-      <img
-        src={sectionIcon}
-        alt=""
-        aria-hidden="true"
-        width={16}
-        height={16}
-        className="size-4 absolute -left-6 align-middle"
-      />
-      <h2 className="text-base font-normal leading-normal text-white uppercase pl-1.5">
-        {title}
-        {required && <span className="ml-0.5 text-[#f7594b]">*</span>}
-      </h2>
-    </div>
-  )
-}
-
-interface TaxSliderProps {
-  label: string
-  value: number
-  onChange: (val: number) => void
-}
-
-function TaxSlider({ label, value, onChange }: TaxSliderProps) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-0.5">
-          <span className="text-sm text-white">{label}</span>
-          <span className="text-sm text-[#f7594b]">*</span>
-        </div>
-        <div className="flex h-8 w-12 items-center justify-center rounded border border-white/30 bg-[#141517] text-sm font-bold text-[#FB5F16]">
-          {value}%
-        </div>
-      </div>
-      <div className="flex flex-col gap-1">
-        <div className="flex justify-between text-xs text-white">
-          <span>0%</span>
-          <span>10%</span>
-        </div>
-        <div className="relative flex items-center py-1">
-          <div className="h-1 w-full rounded-full bg-[#2F3737]">
-            <div
-              className="h-1 rounded-full bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B]"
-              style={{ width: `${(value / 10) * 100}%` }}
-            />
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={10}
-            step={1}
-            value={value}
-            aria-label={label}
-            onChange={(e) => onChange(Number(e.target.value))}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          />
-          <div
-            className="pointer-events-none absolute h-3.5 w-2 -translate-x-1/2 rounded-xs bg-[#FB5F16]"
-            style={{ left: `${(value / 10) * 100}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export const Launch = () => {
   const { address } = useConnection()
   const config = useConfig()
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
-  const [logoError, setLogoError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 预览用 objectURL，组件卸载时释放
@@ -149,11 +75,6 @@ export const Launch = () => {
     },
     [logoPreview],
   )
-
-  // 链上状态与方法（createToken 在实际启用链上创建时会再次接入）
-  const [isTxLoading] = useState(false)
-  const [txResult] = useState<CreateTokenResult | null>(null)
-  const [txError] = useState('')
 
   // 表单状态管理
   const form = useForm({
@@ -165,7 +86,7 @@ export const Launch = () => {
       buyTax: 0,
       sellTax: 0,
       taxDuration: '30',
-      antiFarmerDuration: '30',
+      antiFarmerDuration: '0',
       links: {
         telegram: '',
         twitter: '',
@@ -174,7 +95,7 @@ export const Launch = () => {
     },
     onSubmit: async ({ value }) => {
       if (!logoFile) {
-        setLogoError('请上传代币 Logo')
+        toast.error('请上传代币 Logo')
         return
       }
       if (!address) return
@@ -201,37 +122,22 @@ export const Launch = () => {
           message,
           signature,
         })
-        // await createToken({
-        //   name: value.name,
-        //   symbol: value.symbol,
-        //   meta: value.description,
-        //   buyTax: value.buyTax,
-        //   sellTax: value.sellTax,
-        //   feeRecipient: value.feeRecipient as Hex,
-        //   taxDurationDays: Number(value.taxDuration),
-        //   antiFarmerDurationDays: Number(value.antiFarmerDuration),
-        // })
-      } catch {
-        // 错误已通过 hook 的 error 状态展示
+        toast.success('创建成功！')
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : '创建失败，请稍后再试'
+        toast.error(message, '创建失败')
       }
     },
   })
-
-  // 钱包连接状态变化且表单尚未填入地址时，自动回显钱包地址
-  // useEffect(() => {
-  //   if (address && !form.getFieldValue('feeRecipient')) {
-  //     form.setFieldValue('feeRecipient', address)
-  //   }
-  // }, [address, form])
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 3 * 1024 * 1024) {
-      setLogoError('文件大小不能超过 3 MB')
+      toast.error('文件大小不能超过 3 MB')
       return
     }
-    setLogoError('')
     if (logoPreview) URL.revokeObjectURL(logoPreview)
     setLogoFile(file)
     setLogoPreview(URL.createObjectURL(file))
@@ -284,7 +190,7 @@ export const Launch = () => {
 
         <div className="flex flex-col space-y-10 p-4">
           <div className="flex flex-col gap-6">
-            <SectionHeader title="基本信息" />
+            <FormSectionTitle title="基本信息" />
 
             <div className="flex items-center gap-4">
               <input
@@ -378,11 +284,6 @@ export const Launch = () => {
                   <br />
                   限制 3&nbsp;MB
                 </span>
-                {logoError && (
-                  <p className="mt-2 text-xs text-red-500" role="alert">
-                    {logoError}
-                  </p>
-                )}
               </div>
             </div>
 
@@ -477,7 +378,7 @@ export const Launch = () => {
           </div>
 
           <div className="flex flex-col gap-6">
-            <SectionHeader title="税率设置" />
+            <FormSectionTitle title="税率设置" />
             <form.Field
               name="buyTax"
               validators={{
@@ -487,6 +388,7 @@ export const Launch = () => {
               {(field) => (
                 <TaxSlider
                   label="买入税率"
+                  required
                   value={field.state.value}
                   onChange={field.handleChange}
                 />
@@ -501,6 +403,7 @@ export const Launch = () => {
               {(field) => (
                 <TaxSlider
                   label="卖出税率"
+                  required
                   value={field.state.value}
                   onChange={field.handleChange}
                 />
@@ -509,7 +412,7 @@ export const Launch = () => {
           </div>
 
           <div className="flex flex-col">
-            <SectionHeader title="税费存续期" required />
+            <FormSectionTitle title="收税时长" required />
             <form.Field
               name="taxDuration"
               validators={{
@@ -534,7 +437,7 @@ export const Launch = () => {
                       value={field.state.value}
                       onChange={field.handleChange}
                       onBlur={field.handleBlur}
-                      title="设置税费存续期"
+                      title="设置收税时长"
                       description="税费生效的总天数，期满后买卖税率永久归零"
                       unit="天"
                       min={1}
@@ -558,12 +461,12 @@ export const Launch = () => {
               }}
             </form.Field>
             <p className="text-xs text-[#84888c] mt-2">
-              税费存续期是指代币交易税费生效的总天数。期满后，代币的买入与卖出税率将永久归零。
+              收税时长是指代币交易税费生效的总天数。期满后，代币的买入与卖出税率将永久归零。
             </p>
           </div>
 
           <div className="flex flex-col gap-6">
-            <SectionHeader title="税费接收地址" required />
+            <FormSectionTitle title="税费接收地址" required />
             <form.Field
               name="feeRecipient"
               validators={{ onChange: evmAddressSchema }}
@@ -603,17 +506,39 @@ export const Launch = () => {
           </div>
 
           <div className="flex flex-col">
-            <SectionHeader title="防「挖、提、卖」保护期" required />
+            <FormSectionTitle title="防「挖、提、卖」保护期" required />
             <form.Field
               name="antiFarmerDuration"
-              validators={{ onChange: antiFarmerDurationSchema }}
+              validators={{
+                onChangeListenTo: ['taxDuration'],
+                onChange: ({ value, fieldApi }) => {
+                  const result = antiFarmerDurationSchema.safeParse(value)
+                  if (!result.success) {
+                    return result.error.issues[0]?.message
+                  }
+
+                  const taxDuration = Number(
+                    fieldApi.form.getFieldValue('taxDuration'),
+                  )
+                  if (
+                    Number.isInteger(taxDuration) &&
+                    taxDuration >= 1 &&
+                    taxDuration <= 365 &&
+                    Number(value) > taxDuration
+                  ) {
+                    return '防「挖、提、卖」保护期不能超过收税时长'
+                  }
+
+                  return undefined
+                },
+              }}
             >
               {(field) => {
                 const errorMsg = field.state.meta.errors
                   .map((e) =>
                     typeof e === 'string'
                       ? e
-                      : (e as { message?: unknown }).message,
+                      : (e as unknown as { message?: unknown }).message,
                   )
                   .filter((m): m is string => typeof m === 'string')
                   .join(', ')
@@ -655,7 +580,7 @@ export const Launch = () => {
           </div>
 
           <div className="flex flex-col">
-            <SectionHeader title="可选链接" />
+            <FormSectionTitle title="可选链接" />
             <div className="flex flex-col gap-6 mt-6">
               {linkFields.map((item) => (
                 <form.Field
@@ -696,51 +621,12 @@ export const Launch = () => {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-t-white/10 bg-[#131516] p-4">
         <form.Subscribe
           selector={(state) => ({
-            canSubmit:
-              state.isValid &&
-              !state.isSubmitting &&
-              !isTxLoading &&
-              Boolean(address),
-            isSubmitting: state.isSubmitting || isTxLoading,
+            canSubmit: state.isValid && !state.isSubmitting && Boolean(address),
+            isSubmitting: state.isSubmitting,
           })}
         >
           {({ canSubmit, isSubmitting }) => (
             <>
-              {txError && (
-                <p className="mb-2 text-xs text-red-500 font-medium">
-                  {txError}
-                </p>
-              )}
-
-              {txResult?.tokenAddress && (
-                <div className="mb-3 rounded border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-400">
-                  <p className="font-semibold mb-1">🎉 代币创建成功！</p>
-                  <div className="flex items-center gap-1">
-                    <span>代币地址：</span>
-                    <a
-                      href={`https://testnet.bscscan.com/address/${txResult.tokenAddress}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline inline-flex items-center gap-0.5 font-mono text-white hover:text-[#FFA546]"
-                    >
-                      {txResult.tokenAddress}
-                      <ExternalLink className="size-3" />
-                    </a>
-                  </div>
-                  <div className="flex items-center gap-1 mt-1 text-neutral-400">
-                    <span>交易哈希：</span>
-                    <a
-                      href={`https://testnet.bscscan.com/tx/${txResult.txHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline inline-flex items-center gap-0.5 font-mono hover:text-white"
-                    >
-                      {txResult.txHash.slice(0, 10)}...{txResult.txHash.slice(-8)}
-                    </a>
-                  </div>
-                </div>
-              )}
-
               {!address && (
                 <p className="mb-2 text-xs text-neutral-400">
                   请先连接钱包后再创建代币
