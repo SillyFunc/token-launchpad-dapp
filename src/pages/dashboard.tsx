@@ -621,7 +621,6 @@ export const Dashboard = () => {
                 )
               },
             )
-            void refetch()
           }}
         />
       )}
