@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import {
   Flame,
   Search,
@@ -12,147 +12,83 @@ import {
 } from 'lucide-react'
 
 import boardBanner from '@/assets/images/board-banner.png'
-import token1 from '@/assets/images/token-1.png'
-import token2 from '@/assets/images/token-2.png'
-import token3 from '@/assets/images/token-3.png'
-import token4 from '@/assets/images/token-4.png'
+import { getPopularTokens, type TokenDetail } from '@/api/token'
 
-interface TokenRowData {
-  id: string
-  name: string
-  symbol: string
-  address: string
-  logo: string
-  marketCap: string
-  volume24h: string
-  taxRate: string
-  price: string
-  change24h: string
-  isPositive: boolean
+const usdFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  notation: 'compact',
+  maximumFractionDigits: 2,
+})
+
+const numberFormatter = new Intl.NumberFormat('zh-CN', {
+  notation: 'compact',
+  maximumFractionDigits: 2,
+})
+
+function formatUsd(value: number | null | undefined): string {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num === 0) return '--'
+  return usdFormatter.format(num)
 }
 
-const TOKEN_LIST: TokenRowData[] = [
-  {
-    id: '1',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x38b0c4765d7065660897b212f71881729606180a',
-    logo: token1,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '2',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x5c4217163f844a2b16897b212f71881729606180b',
-    logo: token2,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '3',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x88f117163f844a2b16897b212f71881729606180c',
-    logo: token3,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '4',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x11e417163f844a2b16897b212f71881729606180d',
-    logo: token4,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '5',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x44ab17163f844a2b16897b212f71881729606180e',
-    logo: token1,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '6',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x66cc17163f844a2b16897b212f71881729606180f',
-    logo: token2,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '7',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x77dd17163f844a2b16897b212f718817296061801',
-    logo: token3,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-  {
-    id: '8',
-    name: 'UTILITY',
-    symbol: 'UTIL',
-    address: '0x99ee17163f844a2b16897b212f718817296061802',
-    logo: token4,
-    marketCap: '$6.91M',
-    volume24h: '$17.77M',
-    taxRate: '1%/1%',
-    price: '$0.0069...',
-    change24h: '+1783.38%',
-    isPositive: true,
-  },
-]
+function formatPrice(value: number | null | undefined): string {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num === 0) return '--'
+  return usdFormatter.format(num)
+}
+
+function formatChange(value: number | null | undefined): string {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num === 0) return '0.00%'
+  return `${num > 0 ? '+' : ''}${num.toFixed(2)}%`
+}
+
+function formatAmount(value: number | null | undefined): string {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num === 0) return '--'
+  return numberFormatter.format(num)
+}
+
+function getTokenLogo(token: TokenDetail): string {
+  return token.coinImg || ''
+}
+
+function getChangePercent(token: TokenDetail): number {
+  const issue = Number(token.issuePrice)
+  const trade = Number(token.tradePrice)
+  if (!Number.isFinite(issue) || !Number.isFinite(trade) || issue <= 0) {
+    return 0
+  }
+  return ((trade - issue) / issue) * 100
+}
 
 export const Board = () => {
-  const navigate = useNavigate()
   const [activeFilter, setActiveFilter] = useState('热门')
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
 
+  const {
+    data: tokens,
+    isLoading,
+    isError,
+    isRefetching,
+    refetch,
+  } = useQuery({
+    queryKey: ['popularTokens'],
+    queryFn: () => getPopularTokens(),
+    staleTime: 30_000,
+  })
+
+  const tokenList: TokenDetail[] = Array.isArray(tokens?.list)
+    ? tokens.list
+    : []
+
   const filterOptions = ['热门', '最新', '市值榜', '涨幅榜']
 
-  const handleRowClick = (token: TokenRowData) => {
-    navigate(`/prelaunch?address=${token.address}`)
-  }
-
-  const displayedTokens = TOKEN_LIST.filter((t) => {
+  const displayedTokens = tokenList.filter((t) => {
     if (!searchKeyword.trim()) return true
     const kw = searchKeyword.toLowerCase()
     return (
@@ -290,77 +226,113 @@ export const Board = () => {
         {/* 表头导航栏 (Figma Rectangle 9: h=37, bg #141517) */}
         <div className="flex h-9 items-center justify-between border-b border-white/10 bg-[#141517] px-3 text-xs text-white/80">
           <div className="flex items-center gap-3">
-            <span>市值/24H</span>
-            <span>交易额/税率</span>
+            <span>市值/发行量</span>
+            <span>税率</span>
           </div>
           <div className="flex items-center gap-4 text-right">
             <span>价格</span>
-            <span className="w-20 text-right">24H 涨跌幅</span>
+            <span className="w-20 text-right">涨幅</span>
           </div>
         </div>
 
         {/* 列表条目 (Figma Repeating Rows: 32px Avatar + UTILITY + $6.91M / $17.77M 1%/1% + $0.0069... + +1783.38%) */}
         <div className="divide-y divide-white/10">
-          {displayedTokens.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-12 text-center text-xs text-neutral-500">
-              <Coins className="size-6 mb-2 text-neutral-600" />
-              <span>暂无匹配代币</span>
-            </div>
-          ) : (
-            displayedTokens.map((token) => (
+          {isLoading ? (
+            Array.from({ length: 6 }).map((_, index) => (
               <div
-                key={token.id}
-                onClick={() => handleRowClick(token)}
-                className="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/5 cursor-pointer"
+                key={index}
+                className="flex items-center justify-between px-3 py-2.5"
               >
-                {/* 左侧：Logo 与代币名称/市值明细 */}
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="size-8 shrink-0 overflow-hidden rounded-sm border border-white/30 bg-[#1a1c1e] flex items-center justify-center">
-                    {token.logo ? (
-                      <img
-                        src={token.logo}
-                        alt={token.name}
-                        className="size-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none'
-                        }}
-                      />
-                    ) : (
-                      <Coins className="size-4 text-[#FFA546]" />
-                    )}
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="truncate text-xs font-bold text-[#F0F0F0] leading-tight">
-                      {token.name}
-                    </span>
-                    <div className="flex items-center gap-1 text-[10px] text-white/60 leading-normal">
-                      <span>{token.marketCap}</span>
-                      <span>/</span>
-                      <span>{token.volume24h}</span>
-                      <span className="ml-1 text-white/70">{token.taxRate}</span>
-                    </div>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="size-8 shrink-0 animate-pulse rounded-sm bg-[#2F3737]" />
+                  <div className="flex flex-col gap-1.5">
+                    <div className="h-3 w-20 animate-pulse rounded bg-[#2F3737]" />
+                    <div className="h-2.5 w-32 animate-pulse rounded bg-[#2F3737]" />
                   </div>
                 </div>
-
-                {/* 右侧：价格与涨跌幅徽标 */}
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-mono text-xs font-bold text-[#AAAAAA]">
-                    {token.price}
-                  </span>
-                  <div className="w-20 flex justify-end">
-                    <span
-                      className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none ${
-                        token.isPositive
-                          ? 'bg-[#0ECB81] text-white'
-                          : 'bg-[#F6465D] text-white'
-                      }`}
-                    >
-                      {token.change24h}
-                    </span>
-                  </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <div className="h-3 w-14 animate-pulse rounded bg-[#2F3737]" />
+                  <div className="h-5 w-16 animate-pulse rounded bg-[#2F3737]" />
                 </div>
               </div>
             ))
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center p-12 text-center text-xs text-neutral-500">
+              <Coins className="mb-2 size-6 text-neutral-600" />
+              <span>加载失败，请稍后重试</span>
+              <button
+                type="button"
+                onClick={() => void refetch()}
+                className="mt-3 rounded border border-[#FE810B]/60 bg-[#FD810B1A] px-4 py-1.5 text-xs font-medium text-[#FB5F16] transition-all hover:bg-[#FD810B33] active:translate-y-0.5"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : displayedTokens.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-12 text-center text-xs text-neutral-500">
+              <Coins className="size-6 mb-2 text-neutral-600" />
+              <span>{searchKeyword ? '暂无匹配代币' : '暂无代币数据'}</span>
+            </div>
+          ) : (
+            displayedTokens.map((token) => {
+              const changePercent = getChangePercent(token)
+              const isPositive = changePercent >= 0
+              return (
+                <div
+                  key={token.id}
+                  className="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/5 cursor-pointer"
+                >
+                  {/* 左侧：Logo 与代币名称/市值明细 */}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="size-8 shrink-0 overflow-hidden rounded-sm border border-white/30 bg-[#1a1c1e] flex items-center justify-center">
+                      {getTokenLogo(token) ? (
+                        <img
+                          src={getTokenLogo(token)}
+                          alt={token.name}
+                          className="size-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <Coins className="size-4 text-[#FFA546]" />
+                      )}
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="truncate text-xs font-bold text-[#F0F0F0] leading-tight">
+                        {token.name}
+                      </span>
+                      <div className="flex items-center gap-1 text-[10px] text-white/60 leading-normal">
+                        <span>{formatUsd(token.marketCap)}</span>
+                        <span>/</span>
+                        <span>{formatAmount(token.totalIssuance)}</span>
+                        <span className="ml-1 text-white/70">
+                          {token.buyTax}%/{token.sellTax}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 右侧：价格与涨跌幅徽标 */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="font-mono text-xs font-bold text-[#AAAAAA]">
+                      {formatPrice(token.tradePrice)}
+                    </span>
+                    <div className="w-20 flex justify-end">
+                      <span
+                        className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none ${
+                          isPositive
+                            ? 'bg-[#0ECB81] text-white'
+                            : 'bg-[#F6465D] text-white'
+                        }`}
+                      >
+                        {formatChange(changePercent)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })
           )}
         </div>
       </div>

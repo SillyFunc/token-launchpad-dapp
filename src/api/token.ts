@@ -202,6 +202,14 @@ export function savePresaleInfo(
   return post<void>('deposit/exSwap/swapPresaleAdd', data, config)
 }
 
+export interface PopularTokensResult {
+  list: TokenDetail[]
+}
+
 export function getPopularTokens(config?: AxiosRequestConfig) {
-  return post('deposit/exSwap/swapCoinIssuedList', {}, config)
+  return post<PopularTokensResult>(
+    'deposit/exSwap/swapCoinIssuedList',
+    {},
+    config,
+  )
 }
