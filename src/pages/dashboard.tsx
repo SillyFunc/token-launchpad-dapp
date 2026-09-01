@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
-import { useConnection, useReadContract } from 'wagmi'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useConnection, useConfig, useReadContract } from 'wagmi'
+import { signMessage, writeContract, waitForTransactionReceipt } from '@wagmi/core'
 import { zeroAddress, type Abi } from 'viem'
 import { ConnectKitButton } from 'connectkit'
 import {
@@ -19,9 +20,11 @@ import {
   ShieldCheck,
   Percent,
   Wallet,
+  Loader2,
 } from 'lucide-react'
 
 import { getTokensByCreator, type TokenDetail } from '@/api/token'
+import { getSignMessage } from '@/api/auth'
 import {
   Card,
   CardHeader,
@@ -75,7 +78,10 @@ function TokenCard({
   onClaim: (token: TokenDetail) => void
 }) {
   const { address: connectedAddress } = useConnection()
+  const config = useConfig()
+  const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
+  const [isClaiming, setIsClaiming] = useState(false)
   const isIssued = Boolean(token.coinContractAddress)
   const tokenAddress = token.coinContractAddress || ''
 
@@ -110,11 +116,13 @@ function TokenCard({
     query: { enabled: presaleExists, staleTime: 30_000 },
   }).data as `0x${string}` | undefined
 
+  const tokensClaimed = Boolean(launchStatus && launchStatus[5])
+
   const showClaimButton = Boolean(
     presaleExists &&
     launchStatus &&
     !launchStatus[0] && // enabled
-    !launchStatus[5] && // tokensClaimed
+    !tokensClaimed &&
     presaleOwner === connectedAddress, // isCreator
   )
 
@@ -124,6 +132,39 @@ function TokenCard({
     setCopied(true)
     toast.success('已复制到剪贴板')
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleClaimTokens = async () => {
+    if (!connectedAddress || !presaleAddress) return
+    if (launchStatus && launchStatus[0]) {
+      toast.error('预售已开启，无法领取代币')
+      return
+    }
+    if (launchStatus && launchStatus[5]) {
+      toast.error('代币已领取，不可重复领取')
+      return
+    }
+    setIsClaiming(true)
+    try {
+      const message = await getSignMessage(connectedAddress)
+      await signMessage(config, { message })
+      const hash = await writeContract(config, {
+        address: presaleAddress,
+        abi: PresaleAbi,
+        functionName: 'claimAllTokens',
+        chainId: 97,
+      })
+      await waitForTransactionReceipt(config, { hash, chainId: 97 })
+      queryClient.invalidateQueries()
+      toast.success('请关注您钱包里的代币余额', '领取成功')
+      onClaim(token)
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : '代币领取失败，请稍后重试'
+      toast.error(msg, '领取失败')
+    } finally {
+      setIsClaiming(false)
+    }
   }
 
   return (
@@ -293,55 +334,64 @@ function TokenCard({
         </CardContent>
       </div>
 
-      <CardFooter className="flex items-center justify-end gap-2.5 border-t border-[#2F3737] bg-[#16181a] p-3">
-        {!isIssued && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onEdit(token)}
-            className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
-          >
-            <Edit3 className="size-3.5" />
-            编辑信息
-          </Button>
-        )}
-        {isIssued ? (
-          <>
-            {showClaimButton && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onClaim(token)}
-                className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
-              >
-                <Gift className="size-3.5" />
-                领取代币
-              </Button>
-            )}
+      {(isIssued ? showClaimButton || !tokensClaimed : true) && (
+        <CardFooter className="flex items-center justify-end gap-2.5 border-t border-[#2F3737] bg-[#16181a] p-3">
+          {!isIssued && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onEdit(token)}
+              className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
+            >
+              <Edit3 className="size-3.5" />
+              编辑信息
+            </Button>
+          )}
+          {isIssued ? (
+            <>
+              {showClaimButton && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClaimTokens}
+                  disabled={isClaiming}
+                  className="cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
+                >
+                  {isClaiming ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Gift className="size-3.5" />
+                  )}
+                  {isClaiming ? '领取中…' : '领取代币'}
+                </Button>
+              )}
+              {!tokensClaimed && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => onPresale(token)}
+                  className="cursor-pointer rounded bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                >
+                  <Rocket className="size-3.5" />
+                  我要预售
+                </Button>
+              )}
+            </>
+          ) : (
             <Button
               type="button"
               size="sm"
-              onClick={() => onPresale(token)}
-              className="cursor-pointer rounded bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+              onClick={() => onLaunch(token)}
+              className="cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
             >
               <Rocket className="size-3.5" />
-              我要预售
+              我要发行
             </Button>
-          </>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => onLaunch(token)}
-            className="cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
-          >
-            <Rocket className="size-3.5" />
-            我要发行
-          </Button>
-        )}
-      </CardFooter>
+          )}
+        </CardFooter>
+      )}
     </Card>
   )
 }
@@ -350,6 +400,7 @@ export const Dashboard = () => {
   const { address } = useConnection()
   const { locale } = useLocale()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [editingToken, setEditingToken] = useState<TokenDetail | null>(null)
   const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
 
@@ -392,9 +443,9 @@ export const Dashboard = () => {
     setIssuingToken(token)
   }
 
-  // 领取代币：具体逻辑后续实现
-  const handleClaim = (_token: TokenDetail) => {
-    // TODO: 领取代币逻辑
+  // 领取代币成功后的回调
+  const handleClaim = () => {
+    void refetch()
   }
 
   return (
@@ -558,7 +609,20 @@ export const Dashboard = () => {
         <IssueTokenModal
           token={issuingToken}
           onClose={() => setIssuingToken(null)}
-          onSuccess={() => void refetch()}
+          onSuccess={(tokenAddress) => {
+            queryClient.setQueryData(
+              ['creatorTokens', address],
+              (old: unknown) => {
+                if (!Array.isArray(old)) return old
+                return old.map((t: TokenDetail) =>
+                  t.id === issuingToken.id
+                    ? { ...t, coinContractAddress: tokenAddress as string }
+                    : t,
+                )
+              },
+            )
+            void refetch()
+          }}
         />
       )}
     </div>

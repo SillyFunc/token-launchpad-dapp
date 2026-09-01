@@ -7,7 +7,7 @@
     "build": "rsbuild build",
     "dev": "rsbuild",
     "preview": "rsbuild preview",
-    "sync-abis": "bash scripts/sync-abis.sh"
+    "sync-abis": "bun scripts/sync-abis.ts"
   },
   "dependencies": {
     "@base-org/account": "^2.5.10",

@@ -63,7 +63,7 @@ function toErrorMessage(err: unknown): string {
 export interface IssueTokenModalProps {
   token: TokenDetail
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (tokenAddress: Hex) => void
 }
 
 export function IssueTokenModal({
@@ -131,7 +131,7 @@ export function IssueTokenModal({
 
       setIssuedTokenAddress(result.tokenAddress)
       toast.success('代币已成功发行到区块链！')
-      onSuccess()
+      onSuccess(result.tokenAddress)
     } catch (err: unknown) {
       toast.error(toErrorMessage(err), '发行失败')
     } finally {
