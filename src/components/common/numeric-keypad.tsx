@@ -30,8 +30,6 @@ export interface NumericKeypadProps {
   unit?: string
   /** 是否允许输入小数点，默认 false */
   allowDecimal?: boolean
-  /** 快捷选项预设 */
-  presets?: Array<{ label: string; value: string | number }>
   /** 最小值 */
   min?: number
   /** 最大值 */
@@ -49,7 +47,6 @@ export function NumericKeypad(props: NumericKeypadProps) {
     description,
     unit,
     allowDecimal = false,
-    presets,
     min,
     max,
     maxDecimals = 2,
@@ -120,10 +117,6 @@ export function NumericKeypad(props: NumericKeypadProps) {
     onClose()
   })
 
-  const handlePresetClick = useMemoizedFn((presetVal: string | number) => {
-    setVal(String(presetVal))
-  })
-
   // 4. ahooks useKeyPress: 键盘打开时，支持电脑/外接键盘按键无缝输入
   useKeyPress(
     [
@@ -179,7 +172,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-            className="relative z-10 w-full max-w-lg rounded-t-2xl border-t border-[#484b51] bg-[#141517] pb-safe shadow-2xl"
+            className="relative z-10 w-full rounded-t-2xl border-t border-[#484b51] bg-[#141517] pb-safe shadow-2xl"
           >
             {/* 拖动条把手 */}
             <div className="flex justify-center pt-2.5 pb-1">
@@ -232,31 +225,6 @@ export function NumericKeypad(props: NumericKeypadProps) {
                 </button>
               )}
             </div>
-
-            {/* 快捷预设选项 */}
-            {presets && presets.length > 0 && (
-              <div className="flex items-center gap-2 px-4 py-2.5 overflow-x-auto no-scrollbar border-b border-[#2F3737]/60 bg-[#16181a]">
-                <span className="text-xs text-neutral-500 shrink-0">预设:</span>
-                {presets.map((preset) => {
-                  const isSelected = displayVal === String(preset.value)
-                  return (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      onClick={() => handlePresetClick(preset.value)}
-                      className={cn(
-                        'shrink-0 px-3 py-1 text-xs font-semibold rounded-md border transition-all',
-                        isSelected
-                          ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
-                          : 'border-neutral-800 bg-[#1c1f21] text-neutral-300 hover:border-neutral-700',
-                      )}
-                    >
-                      {preset.label}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
 
             {/* 键盘按键网格 */}
             <div className="p-3 bg-[#131516]">
@@ -337,7 +305,6 @@ export interface NumericInputProps {
   description?: string
   unit?: string
   allowDecimal?: boolean
-  presets?: Array<{ label: string; value: string | number }>
   min?: number
   max?: number
   disabled?: boolean
@@ -354,7 +321,6 @@ export function NumericInput(props: NumericInputProps) {
     description,
     unit,
     allowDecimal = false,
-    presets,
     min,
     max,
     disabled = false,
@@ -417,7 +383,6 @@ export function NumericInput(props: NumericInputProps) {
         description={description}
         unit={unit}
         allowDecimal={allowDecimal}
-        presets={presets}
         min={min}
         max={max}
       />

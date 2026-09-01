@@ -469,13 +469,6 @@ export const Presale = () => {
                         unit="BNB/枚"
                         allowDecimal
                         maxDecimals={9}
-                        presets={[
-                          { label: '0.0000005', value: '0.0000005' },
-                          { label: '0.000001', value: '0.000001' },
-                          { label: '0.000005', value: '0.000005' },
-                          { label: '0.00001', value: '0.00001' },
-                          { label: '0.0001', value: '0.0001' },
-                        ]}
                       />
                     </div>
                     {errorMsg && (
@@ -541,13 +534,6 @@ export const Presale = () => {
                         unit="枚"
                         min={1}
                         max={500000000}
-                        presets={[
-                          { label: '1000万', value: '10000000' },
-                          { label: '5000万', value: '50000000' },
-                          { label: '1亿 (默认)', value: '100000000' },
-                          { label: '2.5亿', value: '250000000' },
-                          { label: '5亿 (不限)', value: '500000000' },
-                        ]}
                       />
                     </div>
                     {errorMsg && (
@@ -605,13 +591,6 @@ export const Presale = () => {
                           unit="BNB"
                           allowDecimal
                           maxDecimals={4}
-                          presets={[
-                            { label: '0.5 BNB', value: '0.5' },
-                            { label: '1 BNB', value: '1' },
-                            { label: '5 BNB', value: '5' },
-                            { label: '10 BNB', value: '10' },
-                            { label: '50 BNB', value: '50' },
-                          ]}
                         />
                       </div>
                       {errorMsg && (
@@ -660,12 +639,6 @@ export const Presale = () => {
                           unit="BNB"
                           allowDecimal
                           maxDecimals={4}
-                          presets={[
-                            { label: '0.1 (默认)', value: '0.1' },
-                            { label: '0.5 BNB', value: '0.5' },
-                            { label: '1 BNB', value: '1' },
-                            { label: '2 BNB', value: '2' },
-                          ]}
                         />
                       </div>
                       {errorMsg && (
@@ -714,17 +687,10 @@ export const Presale = () => {
                         onBlur={field.handleBlur}
                         title="设置募资硬顶 (BNB)"
                         description="募集达到硬顶后认购提前结束，设为 0 表示不限制"
-                        unit="BNB"
-                        allowDecimal
-                        maxDecimals={4}
-                        presets={[
-                          { label: '0 (不限)', value: '0' },
-                          { label: '5 BNB', value: '5' },
-                          { label: '10 BNB', value: '10' },
-                          { label: '50 BNB', value: '50' },
-                          { label: '100 BNB', value: '100' },
-                        ]}
-                      />
+                           unit="BNB"
+                           allowDecimal
+                           maxDecimals={4}
+                         />
                     </div>
                     {errorMsg && (
                       <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
@@ -791,17 +757,10 @@ export const Presale = () => {
                           onBlur={field.handleBlur}
                           title="设置释放周期长度 (7-90 天)"
                           description="开盘后每过一个周期解锁一期代币份额"
-                          unit="天"
-                          min={7}
-                          max={90}
-                          presets={[
-                            { label: '7天 (默认)', value: 7 },
-                            { label: '14天', value: 14 },
-                            { label: '30天', value: 30 },
-                            { label: '60天', value: 60 },
-                            { label: '90天', value: 90 },
-                          ]}
-                        />
+                           unit="天"
+                           min={7}
+                           max={90}
+                         />
                       </div>
                       {errorMsg && (
                         <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
@@ -846,16 +805,10 @@ export const Presale = () => {
                           onBlur={field.handleBlur}
                           title="设置每期释放比例 (5%-20%)"
                           description="每个周期解锁的份额百分比，如 10% 代表共 10 期放完"
-                          unit="%"
-                          min={5}
-                          max={20}
-                          presets={[
-                            { label: '5% (20期)', value: 5 },
-                            { label: '10% (10期)', value: 10 },
-                            { label: '15% (7期)', value: 15 },
-                            { label: '20% (5期)', value: 20 },
-                          ]}
-                        />
+                           unit="%"
+                           min={5}
+                           max={20}
+                         />
                       </div>
                       {errorMsg && (
                         <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
@@ -929,16 +882,9 @@ export const Presale = () => {
                           unit="%"
                           min={0}
                           max={10}
-                          allowDecimal
-                          maxDecimals={1}
-                          presets={[
-                            { label: '0% (默认5%)', value: 0 },
-                            { label: '3%', value: 3 },
-                            { label: '5%', value: 5 },
-                            { label: '8%', value: 8 },
-                            { label: '10%', value: 10 },
-                          ]}
-                        />
+                           allowDecimal
+                           maxDecimals={1}
+                         />
                       </div>
                       {errorMsg && (
                         <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
@@ -1125,16 +1071,10 @@ export const Presale = () => {
                                   onBlur={field.handleBlur}
                                   title="设置买入目标代币数量"
                                   description="开盘时精确买入的代币枚数，上限 5000 万枚"
-                                  unit="枚"
-                                  min={1}
-                                  max={50000000}
-                                  presets={[
-                                    { label: '500万', value: '5000000' },
-                                    { label: '1000万', value: '10000000' },
-                                    { label: '2000万', value: '20000000' },
-                                    { label: '5000万 (上限)', value: '50000000' },
-                                  ]}
-                                />
+                                   unit="枚"
+                                   min={1}
+                                   max={50000000}
+                                 />
                               </div>
                               {errorMsg && (
                                 <p className="mt-1 text-xs text-red-500">
@@ -1185,17 +1125,10 @@ export const Presale = () => {
                                 onBlur={field.handleBlur}
                                 title="设置创建者买入注资金额 (BNB)"
                                 description="开盘结算后超额的 BNB 资金将自动原路退还至您的钱包"
-                                unit="BNB"
-                                allowDecimal
-                                maxDecimals={4}
-                                presets={[
-                                  { label: '0.1 BNB', value: '0.1' },
-                                  { label: '0.3 BNB', value: '0.3' },
-                                  { label: '0.5 BNB', value: '0.5' },
-                                  { label: '1 BNB', value: '1' },
-                                  { label: '2 BNB', value: '2' },
-                                ]}
-                              />
+                                 unit="BNB"
+                                 allowDecimal
+                                 maxDecimals={4}
+                               />
                             </div>
                             {errorMsg && (
                               <p className="mt-1 text-xs text-red-500">

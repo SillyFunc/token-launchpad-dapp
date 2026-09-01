@@ -442,14 +442,6 @@ export const Launch = () => {
                       unit="天"
                       min={1}
                       max={365}
-                      presets={[
-                        { label: '7天', value: 7 },
-                        { label: '14天', value: 14 },
-                        { label: '30天', value: 30 },
-                        { label: '90天', value: 90 },
-                        { label: '180天', value: 180 },
-                        { label: '365天', value: 365 },
-                      ]}
                     />
                     {errorMsg && (
                       <p className="self-stretch text-xs text-red-500 mt-1">
@@ -555,13 +547,6 @@ export const Launch = () => {
                       unit="天"
                       min={0}
                       max={365}
-                      presets={[
-                        { label: '0天 (不启用)', value: 0 },
-                        { label: '7天', value: 7 },
-                        { label: '14天', value: 14 },
-                        { label: '30天', value: 30 },
-                        { label: '90天', value: 90 },
-                      ]}
                     />
                     {errorMsg && (
                       <p className="self-stretch text-xs text-red-500 mt-1">
