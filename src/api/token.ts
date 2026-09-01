@@ -161,3 +161,47 @@ export function getTokensByCreator(
 ) {
   return post<any[]>('deposit/exSwap/swapIssuedList', { address }, config)
 }
+
+export function getTokenByContractAddress(
+  address: string,
+  config?: AxiosRequestConfig,
+) {
+  return post<TokenDetail>(
+    'deposit/exSwap/swapCoinIssuedDetail',
+    { address },
+    config,
+  )
+}
+
+export interface PresaleConfigPayload {
+  presaleTokenPrice: string
+  maxBuyPerWallet: string
+  hardcap: string
+  minLiquidityAmount: string
+  softCap: string
+  startTime: number
+  vestingDelay: number
+  vestingRate: number
+  slippage: number
+  creatorBuyTokens: string
+}
+
+export interface SavePresaleData {
+  token: string
+  presaleConfig: PresaleConfigPayload
+  creatorBuyBnb: string
+  address?: string
+  message?: string
+  signature?: string
+}
+
+export function savePresaleInfo(
+  data: SavePresaleData,
+  config?: AxiosRequestConfig,
+): Promise<void> {
+  return post<void>('deposit/exSwap/swapPresaleAdd', data, config)
+}
+
+export function getPopularTokens(config?: AxiosRequestConfig) {
+  return post('deposit/exSwap/swapCoinIssuedList', {}, config)
+}

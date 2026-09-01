@@ -193,7 +193,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
                   {title}
                 </h3>
                 {description && (
-                  <p className="text-[11px] text-neutral-400 mt-0.5">
+                  <p className="text-xs text-neutral-400 mt-0.5">
                     {description}
                   </p>
                 )}
@@ -340,6 +340,7 @@ export interface NumericInputProps {
   presets?: Array<{ label: string; value: string | number }>
   min?: number
   max?: number
+  maxDecimals?: number
   disabled?: boolean
   className?: string
 }
@@ -357,6 +358,7 @@ export function NumericInput(props: NumericInputProps) {
     presets,
     min,
     max,
+    maxDecimals,
     disabled = false,
     className,
   } = props
@@ -420,6 +422,7 @@ export function NumericInput(props: NumericInputProps) {
         presets={presets}
         min={min}
         max={max}
+        maxDecimals={maxDecimals}
       />
     </>
   )

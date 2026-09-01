@@ -63,7 +63,6 @@ function formatAddress(addr?: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-/** 紧凑中文单位：1234567890 → 12.35亿，56700 → 5.67万 */
 const totalSupplyFormatter = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
   maximumFractionDigits: 2,
@@ -93,7 +92,6 @@ function TokenCard({
   const isIssued = Boolean(token.coinContractAddress)
   const tokenAddress = token.coinContractAddress || ''
 
-  // 代币地址 → 预售合约
   const presaleAddress = useReadContract({
     address: CONTRACT_ADDRESSES[97].coordinatorFactory,
     abi: CoordinatorFactoryAbi,
@@ -102,9 +100,11 @@ function TokenCard({
     chainId: 97,
     query: { enabled: isIssued, staleTime: 30_000 },
   }).data as `0x${string}` | undefined
-  const presaleExists = Boolean(presaleAddress && presaleAddress !== zeroAddress)
 
-  // 预售未启用且代币未被领取，且当前钱包是预售 owner，才可领取
+  const presaleExists = Boolean(
+    presaleAddress && presaleAddress !== zeroAddress,
+  )
+
   const launchStatus = useReadContract({
     address: presaleAddress && presaleExists ? presaleAddress : undefined,
     abi: PresaleAbi,
@@ -114,6 +114,7 @@ function TokenCard({
   }).data as
     | readonly [boolean, bigint, bigint, bigint, boolean, boolean]
     | undefined
+
   const presaleOwner = useReadContract({
     address: presaleAddress && presaleExists ? presaleAddress : undefined,
     abi: PresaleAbi,
@@ -124,10 +125,10 @@ function TokenCard({
 
   const showClaimButton = Boolean(
     presaleExists &&
-      launchStatus &&
-      !launchStatus[0] && // enabled
-      !launchStatus[5] && // tokensClaimed
-      presaleOwner === connectedAddress, // isCreator
+    launchStatus &&
+    !launchStatus[0] && // enabled
+    !launchStatus[5] && // tokensClaimed
+    presaleOwner === connectedAddress, // isCreator
   )
 
   const handleCopy = () => {
@@ -141,7 +142,6 @@ function TokenCard({
   return (
     <Card className="flex flex-col justify-between overflow-hidden rounded-lg border border-[#484b51] bg-[#131516] p-0 text-white shadow-lg transition-all hover:border-[#FE810B]/60">
       <div>
-        {/* 卡片头部 */}
         <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[#2F3737] p-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[#484b51] bg-[#1a1c1e]">
@@ -164,7 +164,7 @@ function TokenCard({
                   {token.name}
                 </CardTitle>
                 <span className="shrink-0 rounded bg-[#FE810B]/15 px-2 py-0.5 text-xs font-semibold text-[#FFA546]">
-                  {token.symbol}
+                  &#36;{token.symbol}
                 </span>
               </div>
               <CardDescription className="mt-1 flex items-center gap-1 text-xs text-neutral-400">
@@ -200,14 +200,11 @@ function TokenCard({
           </div>
         </CardHeader>
 
-        {/* 卡片内容 */}
         <CardContent className="space-y-3 p-4">
-          {/* 代币描述 */}
           <p className="min-h-8 text-xs text-neutral-400 line-clamp-2">
             {token.meta || token.zhIntroduction || '暂无代币描述信息'}
           </p>
 
-          {/* 核心指标参数：一行一条 */}
           <div className="flex flex-col divide-y divide-[#2F3737]/60 rounded-md border border-[#2F3737] bg-[#17191b] px-3 py-1 text-xs">
             <div className="flex items-center justify-between py-2">
               <span className="flex items-center gap-1.5 text-neutral-400">
@@ -269,7 +266,6 @@ function TokenCard({
             </div>
           </div>
 
-          {/* 社交链接 */}
           {(token.website || token.twitter || token.telegram) && (
             <div className="flex items-center gap-3 pt-1 text-xs text-neutral-400">
               {token.website && (
@@ -310,7 +306,6 @@ function TokenCard({
         </CardContent>
       </div>
 
-      {/* 卡片操作按钮 */}
       <CardFooter className="flex items-center justify-end gap-2.5 border-t border-[#2F3737] bg-[#16181a] p-3">
         {!isIssued && (
           <Button
@@ -342,7 +337,7 @@ function TokenCard({
               type="button"
               size="sm"
               onClick={() => onPresale(token)}
-              className="cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+              className="cursor-pointer rounded bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
             >
               <Rocket className="size-3.5" />
               我要预售
@@ -384,7 +379,6 @@ export const Dashboard = () => {
 
   const tokenList = Array.isArray(tokens) ? tokens : []
 
-  // 所有代币发行总量固定，取任意一张已发行代币合约读一次 totalSupply 共用
   const firstIssued = tokenList.find((t) => t.coinContractAddress)
   const totalSupplyData = useReadContract({
     address: firstIssued?.coinContractAddress as `0x${string}` | undefined,
@@ -403,7 +397,7 @@ export const Dashboard = () => {
 
   const handlePresale = (token: TokenDetail) => {
     const tokenAddr = token.coinContractAddress || ''
-    navigate(`/prelaunch?address=${tokenAddr}`)
+    navigate(`/presale?address=${tokenAddr}`)
   }
 
   const handleLaunch = (token: TokenDetail) => {

@@ -243,7 +243,7 @@ export const Launch = () => {
       onSubmit={(e) => {
         e.preventDefault()
         e.stopPropagation()
-        void form.handleSubmit()
+        form.handleSubmit()
       }}
     >
       <div className="flex items-center gap-3 mb-4">
@@ -274,7 +274,7 @@ export const Launch = () => {
             </div>
           </div>
           <Link
-            to="/prelaunch"
+            to="/launch"
             className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
           >
             保留 CA

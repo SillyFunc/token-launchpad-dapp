@@ -1,4 +1,4 @@
-import { useAccount, useChainId, useConfig, useReadContract } from 'wagmi'
+import { useChainId, useConfig, useConnection, useReadContract } from 'wagmi'
 import {
   readContract,
   switchChain,
@@ -16,7 +16,6 @@ import {
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
 import { CONTRACT_ADDRESSES, getContractAddresses } from '@/contracts/addresses'
 
-// JSON 字面量推断的类型对 viem 泛型不友好，窄化为 Abi
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
 export interface CreateTokenParams {
@@ -116,7 +115,7 @@ function toCoordinatorError(err: unknown): CoordinatorError {
 /** 按当前钱包网络解析 CoordinatorFactory 地址（缺省降级为 BSC 测试网 97） */
 function useCoordinatorFactory() {
   const chainId = useChainId()
-  const { chainId: connChainId } = useAccount()
+  const { chainId: connChainId } = useConnection()
   const effectiveChainId = connChainId || chainId || 97
   return (
     getContractAddresses(effectiveChainId)?.coordinatorFactory ??

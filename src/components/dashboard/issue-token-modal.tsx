@@ -39,7 +39,6 @@ function formatAddress(addr?: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-/** 契约层错误码 → 用户可读文案（文案归 UI 层管理） */
 const ERROR_MESSAGES: Record<CoordinatorErrorCode, string> = {
   USER_REJECTED: '用户已取消交易',
   INSUFFICIENT_FUNDS: '钱包 BSC 测试网 tBNB 余额不足，请领取测试币后再试',
@@ -83,12 +82,9 @@ export function IssueTokenModal({
   const { formattedFee } = useCreationFee()
   const { execute: createToken } = useCreateToken()
 
-  // UI 层自行管理的状态
   const [copied, setCopied] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
-  const [issuedTokenAddress, setIssuedTokenAddress] = useState<Hex | null>(
-    null,
-  )
+  const [issuedTokenAddress, setIssuedTokenAddress] = useState<Hex | null>(null)
 
   const isIssued = issuedTokenAddress !== null
 
@@ -107,11 +103,9 @@ export function IssueTokenModal({
 
     setIsExecuting(true)
     try {
-      // 1. 上链之前先获取签名消息并完成钱包鉴权签名
       const message = await getSignMessage(address)
       const signature = await signMessage(config, { message })
 
-      // 2. 发起合约交易上链部署
       const result = await createToken({
         name: token.name,
         symbol: token.symbol,
@@ -126,7 +120,6 @@ export function IssueTokenModal({
         salt: token.salt ? (token.salt as Hex) : undefined,
       })
 
-      // 3. 上链成功后，将 txHash、address、message、signature 传给解析 hash 接口
       if (token.id && result.txHash) {
         try {
           await parseTxHash({
@@ -145,7 +138,11 @@ export function IssueTokenModal({
       toast.add({ description: '代币已成功发行到区块链！', type: 'success' })
       onSuccess()
     } catch (err: unknown) {
-      toast.add({ title: '发行失败', description: toErrorMessage(err), type: 'error' })
+      toast.add({
+        title: '发行失败',
+        description: toErrorMessage(err),
+        type: 'error',
+      })
     } finally {
       setIsExecuting(false)
     }
@@ -189,7 +186,7 @@ export function IssueTokenModal({
                   {token.name}
                 </span>
                 <span className="rounded bg-[#FE810B]/15 px-1.5 py-0.5 text-xs font-semibold text-[#FFA546]">
-                  {token.symbol}
+                  &#36;{token.symbol}
                 </span>
               </div>
               <p className="mt-1 truncate text-xs text-neutral-400">
@@ -198,7 +195,6 @@ export function IssueTokenModal({
             </div>
           </div>
 
-          {/* 确认参数明细清单 */}
           <div className="flex flex-col divide-y divide-[#2F3737] rounded-lg border border-[#2F3737] bg-[#181a1d] px-3.5 text-xs">
             <div className="flex items-center justify-between py-2.5">
               <span className="text-neutral-400">买入 / 卖出税率</span>
@@ -246,17 +242,16 @@ export function IssueTokenModal({
             </div>
           </div>
 
-          {/* 风险提示 */}
           {!isIssued && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
               <span>
-                链上发行后合约参数将写入区块链且不可更改，请确认钱包留有足够的 BNB 支付 Gas 费。
+                链上发行后合约参数将写入区块链且不可更改，请确认钱包留有足够的
+                BNB 支付 Gas 费。
               </span>
             </div>
           )}
 
-          {/* 发行成功卡片 */}
           {isIssued && issuedTokenAddress && (
             <div className="flex flex-col gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-4 text-xs text-green-400">
               <div className="flex items-center gap-2 font-bold text-sm text-green-300">
@@ -309,7 +304,7 @@ export function IssueTokenModal({
                 size="sm"
                 onClick={() => {
                   onClose()
-                  navigate(`/prelaunch?address=${issuedTokenAddress}`)
+                  navigate(`/presale?address=${issuedTokenAddress}`)
                 }}
                 className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000]"
               >
