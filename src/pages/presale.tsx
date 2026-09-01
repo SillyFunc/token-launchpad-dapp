@@ -23,16 +23,11 @@ import {
   savePresaleInfo,
 } from '@/api/token'
 import { getSignMessage } from '@/api/auth'
+import { formatAddress } from '@/lib/format'
 import { NumericInput } from '@/components/ui/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import sectionIcon from '@/assets/icons/section-title-icon.svg'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
-
-function formatAddress(addr?: string): string {
-  if (!addr) return '--'
-  if (addr.length <= 10) return addr
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
 
 interface SectionHeaderProps {
   title: string

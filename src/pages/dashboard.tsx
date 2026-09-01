@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useConnection, useReadContract } from 'wagmi'
-import { formatUnits, zeroAddress, type Abi } from 'viem'
+import { zeroAddress, type Abi } from 'viem'
 import { ConnectKitButton } from 'connectkit'
 import {
   Coins,
@@ -38,6 +38,8 @@ import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 import PresaleAbiJson from '@/contracts/abi/Presale.json'
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
 import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
+import { formatAddress, formatTokenSupply } from '@/lib/format'
+import { useLocale } from '@/lib/i18n'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 
 const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
@@ -55,21 +57,6 @@ function TwitterIcon({ className }: { className?: string }) {
       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
   )
-}
-
-function formatAddress(addr?: string): string {
-  if (!addr) return '--'
-  if (addr.length <= 10) return addr
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
-
-const totalSupplyFormatter = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 2,
-})
-
-function formatTotalSupply(supply: bigint): string {
-  return totalSupplyFormatter.format(Number(formatUnits(supply, 18)))
 }
 
 function TokenCard({
@@ -361,6 +348,7 @@ function TokenCard({
 
 export const Dashboard = () => {
   const { address } = useConnection()
+  const { locale } = useLocale()
   const navigate = useNavigate()
   const [editingToken, setEditingToken] = useState<TokenDetail | null>(null)
   const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
@@ -392,7 +380,7 @@ export const Dashboard = () => {
   }).data as bigint | undefined
   const totalSupplyText =
     totalSupplyData !== undefined && totalSupplyData !== null
-      ? formatTotalSupply(totalSupplyData)
+      ? formatTokenSupply(totalSupplyData, locale)
       : '--'
 
   const handlePresale = (token: TokenDetail) => {

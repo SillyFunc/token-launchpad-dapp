@@ -32,12 +32,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
-
-function formatAddress(addr?: string): string {
-  if (!addr) return '--'
-  if (addr.length <= 10) return addr
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
-}
+import { formatAddress } from '@/lib/format'
 
 const ERROR_MESSAGES: Record<CoordinatorErrorCode, string> = {
   USER_REJECTED: '用户已取消交易',

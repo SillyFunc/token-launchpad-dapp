@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useReadContract } from 'wagmi'
-import { formatUnits, type Abi } from 'viem'
+import { type Abi } from 'viem'
 import {
   Flame,
   Search,
@@ -15,43 +15,11 @@ import {
 
 import boardBanner from '@/assets/images/board-banner.png'
 import { getPopularTokens, type TokenDetail } from '@/api/token'
+import { formatUsd, formatPercent, formatTokenSupply } from '@/lib/format'
+import { useLocale } from '@/lib/i18n'
 import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 
 const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
-
-const usdFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 2,
-})
-
-function formatUsd(value: number | null | undefined): string {
-  const num = Number(value)
-  if (!Number.isFinite(num) || num === 0) return '--'
-  return usdFormatter.format(num)
-}
-
-function formatPrice(value: number | null | undefined): string {
-  const num = Number(value)
-  if (!Number.isFinite(num) || num === 0) return '--'
-  return usdFormatter.format(num)
-}
-
-function formatChange(value: number | null | undefined): string {
-  const num = Number(value)
-  if (!Number.isFinite(num) || num === 0) return '0.00%'
-  return `${num > 0 ? '+' : ''}${num.toFixed(2)}%`
-}
-
-const totalSupplyFormatter = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 2,
-})
-
-function formatTotalSupply(supply: bigint): string {
-  return totalSupplyFormatter.format(Number(formatUnits(supply, 18)))
-}
 
 function getTokenLogo(token: TokenDetail): string {
   return token.coinImg || ''
@@ -67,6 +35,7 @@ function getChangePercent(token: TokenDetail): number {
 }
 
 export const Board = () => {
+  const { locale } = useLocale()
   const [activeFilter, setActiveFilter] = useState('热门')
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -103,7 +72,7 @@ export const Board = () => {
   }).data as bigint | undefined
   const totalSupplyText =
     totalSupplyData !== undefined && totalSupplyData !== null
-      ? formatTotalSupply(totalSupplyData)
+      ? formatTokenSupply(totalSupplyData, locale)
       : '--'
 
   const filterOptions = ['热门', '最新', '市值榜', '涨幅榜']
@@ -323,7 +292,7 @@ export const Board = () => {
                         {token.name}
                       </span>
                       <div className="flex items-center gap-1 text-[10px] text-white/60 leading-normal">
-                        <span>{formatUsd(token.marketCap)}</span>
+                        <span>{formatUsd(token.marketCap, locale)}</span>
                         <span>/</span>
                         <span>{totalSupplyText}</span>
                         <span className="ml-1 text-white/70">
@@ -336,7 +305,7 @@ export const Board = () => {
                   {/* 右侧：价格与涨跌幅徽标 */}
                   <div className="flex items-center gap-3 shrink-0">
                     <span className="font-mono text-xs font-bold text-[#AAAAAA]">
-                      {formatPrice(token.tradePrice)}
+                      {formatUsd(token.tradePrice, locale)}
                     </span>
                     <div className="w-20 flex justify-end">
                       <span
@@ -346,7 +315,7 @@ export const Board = () => {
                             : 'bg-[#F6465D] text-white'
                         }`}
                       >
-                        {formatChange(changePercent)}
+                        {formatPercent(changePercent)}
                       </span>
                     </div>
                   </div>

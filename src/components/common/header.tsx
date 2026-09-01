@@ -2,6 +2,8 @@ import { Link } from 'react-router'
 import { MenuIcon, XIcon } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 
+import { formatAddress } from '@/lib/format'
+
 interface HeaderProps {
   isMenuOpen: boolean
   onToggleMenu: () => void
@@ -70,7 +72,7 @@ export const Header = ({ isMenuOpen, onToggleMenu }: HeaderProps) => {
                 type="button"
                 className="cursor-pointer rounded-md border border-[#FE810B] bg-[#FD810B1A] px-6 py-1.5 text-sm font-semibold transition-all active:translate-y-0.5 hover:bg-[#FD810B33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
               >
-                {ensName ?? address?.slice(0, 6) + '…' + address?.slice(-4)}
+                {ensName ?? formatAddress(address)}
               </button>
             )
           }}
