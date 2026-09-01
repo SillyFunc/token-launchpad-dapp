@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useReadContract } from 'wagmi'
 import { type Abi } from 'viem'
@@ -15,24 +15,12 @@ import {
 
 import boardBanner from '@/assets/images/board-banner.png'
 import { getPopularTokens, type TokenDetail } from '@/api/token'
-import { formatUsd, formatPercent, formatTokenSupply } from '@/lib/format'
+import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
+import { TokenRow } from '@/components/board/token-row'
 import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 
 const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
-
-function getTokenLogo(token: TokenDetail): string {
-  return token.coinImg || ''
-}
-
-function getChangePercent(token: TokenDetail): number {
-  const issue = Number(token.issuePrice)
-  const trade = Number(token.tradePrice)
-  if (!Number.isFinite(issue) || !Number.isFinite(trade) || issue <= 0) {
-    return 0
-  }
-  return ((trade - issue) / issue) * 100
-}
 
 export const Board = () => {
   const { locale } = useLocale()
@@ -41,6 +29,21 @@ export const Board = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
+  const [bnbUsd, setBnbUsd] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchBnb = async () => {
+      const price = await getBnbUsd()
+      if (!cancelled && price > 0) setBnbUsd(price)
+    }
+    fetchBnb()
+    const interval = setInterval(fetchBnb, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
 
   const {
     data: tokens,
@@ -58,7 +61,6 @@ export const Board = () => {
     ? tokens.list
     : []
 
-  // 所有代币发行量固定，只需取第一个已发行代币查询一次
   const supplyToken = tokenList.find((t) => t.coinContractAddress)
   const totalSupplyData = useReadContract({
     address: supplyToken?.coinContractAddress as `0x${string}` | undefined,
@@ -70,10 +72,6 @@ export const Board = () => {
       staleTime: Infinity,
     },
   }).data as bigint | undefined
-  const totalSupplyText =
-    totalSupplyData !== undefined && totalSupplyData !== null
-      ? formatTokenSupply(totalSupplyData, locale)
-      : '--'
 
   const filterOptions = ['热门', '最新', '市值榜', '涨幅榜']
 
@@ -89,23 +87,19 @@ export const Board = () => {
 
   return (
     <div className="relative mx-auto flex w-full flex-col pb-24 pt-3 text-white space-y-3">
-      {/* 1. 顶部轮播 / Banner 区域 (Figma Group 181: 343x122) */}
       <div className="relative w-full overflow-hidden rounded-md border border-white/10 bg-black">
         <img
           src={boardBanner}
           alt="Banner"
           className="h-32 w-full object-cover"
         />
-        {/* 底部小圆点指示器 */}
         <div className="absolute inset-x-0 bottom-2.5 flex items-center justify-center gap-1.5 pointer-events-none">
           <div className="h-1.5 w-4 rounded-full bg-[#F8EA25]" />
           <div className="size-1.5 rounded-full bg-[#333333]" />
         </div>
       </div>
 
-      {/* 2. 快捷操作与筛选栏 (Figma y=256: 热门 / 热搜 / 切换视图 / 筛选) */}
       <div className="flex items-center justify-between gap-2">
-        {/* 左侧：热门下拉选择 (Figma Group 260: w=92, h=28) */}
         <div className="relative">
           <button
             type="button"
@@ -140,9 +134,7 @@ export const Board = () => {
           )}
         </div>
 
-        {/* 右侧控制组：热搜 / 视图切换 / 筛选 */}
         <div className="flex items-center gap-2">
-          {/* 热搜按钮 (Figma Rectangle 6 + 热搜: w=56, h=28) */}
           <button
             type="button"
             onClick={() => setIsSearchOpen((prev) => !prev)}
@@ -152,7 +144,6 @@ export const Board = () => {
             <span>热搜</span>
           </button>
 
-          {/* 列表/网格视图切换 (Figma Group 18: w=56, h=28) */}
           <div className="flex h-7 items-center divide-x divide-white/10 rounded border border-white/10 bg-black">
             <button
               type="button"
@@ -176,7 +167,6 @@ export const Board = () => {
             </button>
           </div>
 
-          {/* 筛选按钮 (Figma Rectangle 7: w=28, h=28) */}
           <button
             type="button"
             aria-label="更多筛选"
@@ -187,7 +177,6 @@ export const Board = () => {
         </div>
       </div>
 
-      {/* 搜索展开栏 */}
       {isSearchOpen && (
         <div className="relative flex items-center">
           <Search className="absolute left-3 size-3.5 text-neutral-500" />
@@ -210,21 +199,18 @@ export const Board = () => {
         </div>
       )}
 
-      {/* 3. 代币列表展示 (Figma 1-0 首页-列展示: Rectangle 8: 343x453) */}
       <div className="w-full overflow-hidden rounded-md border border-white/10 bg-black">
-        {/* 表头导航栏 (Figma Rectangle 9: h=37, bg #141517) */}
         <div className="flex h-9 items-center justify-between border-b border-white/10 bg-[#141517] px-3 text-xs text-white/80">
           <div className="flex items-center gap-3">
-            <span>市值/发行量</span>
+            <span>市值/状态</span>
             <span>税率</span>
           </div>
           <div className="flex items-center gap-4 text-right">
-            <span>价格</span>
-            <span className="w-20 text-right">涨幅</span>
+            <span className="w-14">价格</span>
+            <span className="w-20">涨幅</span>
           </div>
         </div>
 
-        {/* 列表条目 (Figma Repeating Rows: 32px Avatar + UTILITY + $6.91M / $17.77M 1%/1% + $0.0069... + +1783.38%) */}
         <div className="divide-y divide-white/10">
           {isLoading ? (
             Array.from({ length: 6 }).map((_, index) => (
@@ -241,7 +227,7 @@ export const Board = () => {
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <div className="h-3 w-14 animate-pulse rounded bg-[#2F3737]" />
-                  <div className="h-5 w-16 animate-pulse rounded bg-[#2F3737]" />
+                  <div className="h-5 w-20 animate-pulse rounded bg-[#2F3737]" />
                 </div>
               </div>
             ))
@@ -263,65 +249,15 @@ export const Board = () => {
               <span>{searchKeyword ? '暂无匹配代币' : '暂无代币数据'}</span>
             </div>
           ) : (
-            displayedTokens.map((token) => {
-              const changePercent = getChangePercent(token)
-              const isPositive = changePercent >= 0
-              return (
-                <div
-                  key={token.id}
-                  className="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/5 cursor-pointer"
-                >
-                  {/* 左侧：Logo 与代币名称/市值明细 */}
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="size-8 shrink-0 overflow-hidden rounded-sm border border-white/30 bg-[#1a1c1e] flex items-center justify-center">
-                      {getTokenLogo(token) ? (
-                        <img
-                          src={getTokenLogo(token)}
-                          alt={token.name}
-                          className="size-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none'
-                          }}
-                        />
-                      ) : (
-                        <Coins className="size-4 text-[#FFA546]" />
-                      )}
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="truncate text-xs font-bold text-[#F0F0F0] leading-tight">
-                        {token.name}
-                      </span>
-                      <div className="flex items-center gap-1 text-[10px] text-white/60 leading-normal">
-                        <span>{formatUsd(token.marketCap, locale)}</span>
-                        <span>/</span>
-                        <span>{totalSupplyText}</span>
-                        <span className="ml-1 text-white/70">
-                          {token.buyTax}%/{token.sellTax}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 右侧：价格与涨跌幅徽标 */}
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-mono text-xs font-bold text-[#AAAAAA]">
-                      {formatUsd(token.tradePrice, locale)}
-                    </span>
-                    <div className="w-20 flex justify-end">
-                      <span
-                        className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none ${
-                          isPositive
-                            ? 'bg-[#0ECB81] text-white'
-                            : 'bg-[#F6465D] text-white'
-                        }`}
-                      >
-                        {formatPercent(changePercent)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )
-            })
+            displayedTokens.map((token) => (
+              <TokenRow
+                key={token.id}
+                token={token}
+                totalSupplyData={totalSupplyData}
+                locale={locale}
+                bnbUsd={bnbUsd}
+              />
+            ))
           )}
         </div>
       </div>
