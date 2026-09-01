@@ -12,8 +12,8 @@ interface SidebarProps {
 const navItems = [
   { name: '首页', path: '/board' },
   { name: '发射', path: '/launch' },
-  { name: '预售', path: '/prelaunch' },
-  { name: '我的', path: '/me' },
+  { name: '控制台', path: '/dashboard' },
+  // { name: '我的', path: '/me' },
 ]
 
 const languages = ['中文', 'EN']
