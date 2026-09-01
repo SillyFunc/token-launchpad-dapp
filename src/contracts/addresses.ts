@@ -5,10 +5,10 @@
 export const CONTRACT_ADDRESSES = {
   // BSC Testnet
   97: {
-    tokenFactory: '0x0609349969a50e14ef0e9b628cce9afb0a183bf9',
-    presaleFactory: '0x81754273b6b3dcf536b14c8e37a5154e919a0d19',
-    coordinatorFactory: '0xd1ec0390d9847a711a0ccea8aaa383ec59c7680a',
-    flapTaxTokenV3: '0x47ab84f2fefd302e92f2806466d1937c6a0914cb',
+    tokenFactory: '0x14bbbb755b03cb109ecc54c59b6bcff8f90e6144',
+    presaleFactory: '0xadc0427f6cf23e6a55eb49631e71f06979683562',
+    coordinatorFactory: '0xfd20244a99d4331e842e91f04c75032d427b76dd',
+    flapTaxTokenV3: '0xeb233e41a6a134c2b7e0dd4cc4ee90dd5478dead',
   },
   // BSC Mainnet — 部署后补充
   // 56: { ... },
