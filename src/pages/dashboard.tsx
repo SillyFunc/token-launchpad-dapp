@@ -396,8 +396,8 @@ export const Dashboard = () => {
       : '--'
 
   const handlePresale = (token: TokenDetail) => {
-    const tokenAddr = token.coinContractAddress || ''
-    navigate(`/presale?address=${tokenAddr}`)
+    // const tokenAddr = token.coinContractAddress || ''
+    // navigate(`/presale?address=${tokenAddr}`)
   }
 
   const handleLaunch = (token: TokenDetail) => {
