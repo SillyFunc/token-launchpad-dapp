@@ -18,3 +18,4 @@ dist/
 .env
 .mcp.json
 docs/
+*.zip
