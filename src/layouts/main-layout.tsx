@@ -14,7 +14,7 @@ export const MainLayout = () => {
         onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
       />
       <Sidebar isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
-      <main className="relative z-10 mx-auto flex w-full flex-1 flex-col px-4">
+      <main className="relative z-10 mx-auto flex min-h-0 w-full flex-1 flex-col px-4">
         <Outlet />
       </main>
       <Toaster />

@@ -90,7 +90,7 @@ export const Presale = () => {
   const handleCopy = (text: string) => {
     void navigator.clipboard.writeText(text)
     setCopied(true)
-    toast.add({ description: '已复制到剪贴板', type: 'success' })
+    toast.success('已复制到剪贴板')
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -114,7 +114,7 @@ export const Presale = () => {
     onSubmit: async ({ value }) => {
       setSubmitError('')
       if (!address) {
-        toast.add({ description: '请先连接钱包', type: 'error' })
+        toast.error('请先连接钱包')
         return
       }
       if (!tokenAddress) {
@@ -220,15 +220,12 @@ export const Presale = () => {
         })
 
         setIsSuccess(true)
-        toast.add({
-          description: '预售条款配置成功！已准备发起预售。',
-          type: 'success',
-        })
+        toast.success('预售条款配置成功！已准备发起预售。')
       } catch (err: unknown) {
         const msg =
           err instanceof Error ? err.message : '配置预售失败，请稍后重试'
         setSubmitError(msg)
-        toast.add({ title: '配置失败', description: msg, type: 'error' })
+        toast.error(msg, '配置失败')
       }
     },
   })

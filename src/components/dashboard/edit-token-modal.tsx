@@ -119,7 +119,7 @@ export function EditTokenModal({
     },
     onSubmit: async ({ value }) => {
       if (!address) {
-        toast.add({ description: '请先连接钱包', type: 'error' })
+        toast.error('请先连接钱包')
         return
       }
 
@@ -150,7 +150,7 @@ export function EditTokenModal({
           message,
           signature,
         })
-        toast.add({ description: '代币信息修改已保存！', type: 'success' })
+        toast.success('代币信息修改已保存！')
         onSuccess()
         setTimeout(() => {
           onClose()
@@ -158,7 +158,7 @@ export function EditTokenModal({
       } catch (err: unknown) {
         const msg =
           err instanceof Error ? err.message : '保存修改失败，请稍后重试'
-        toast.add({ description: msg, type: 'error' })
+        toast.error(msg)
       }
     },
   })
@@ -167,7 +167,7 @@ export function EditTokenModal({
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 3 * 1024 * 1024) {
-      toast.add({ description: 'Logo 文件大小不能超过 3 MB', type: 'error' })
+      toast.error('Logo 文件大小不能超过 3 MB')
       return
     }
     if (logoPreview && logoPreview.startsWith('blob:')) {

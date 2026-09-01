@@ -135,7 +135,7 @@ function TokenCard({
     if (!tokenAddress) return
     void navigator.clipboard.writeText(tokenAddress)
     setCopied(true)
-    toast.add({ description: '已复制到剪贴板', type: 'success' })
+    toast.success('已复制到剪贴板')
     setTimeout(() => setCopied(false), 2000)
   }
 

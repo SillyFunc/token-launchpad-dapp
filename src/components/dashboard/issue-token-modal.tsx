@@ -91,13 +91,13 @@ export function IssueTokenModal({
   const handleCopy = (text: string) => {
     void navigator.clipboard.writeText(text)
     setCopied(true)
-    toast.add({ description: '已复制到剪贴板', type: 'success' })
+    toast.success('已复制到剪贴板')
     setTimeout(() => setCopied(false), 2000)
   }
 
   const handleExecute = async () => {
     if (!address) {
-      toast.add({ description: '请先连接钱包', type: 'error' })
+      toast.error('请先连接钱包')
       return
     }
 
@@ -135,14 +135,10 @@ export function IssueTokenModal({
       }
 
       setIssuedTokenAddress(result.tokenAddress)
-      toast.add({ description: '代币已成功发行到区块链！', type: 'success' })
+      toast.success('代币已成功发行到区块链！')
       onSuccess()
     } catch (err: unknown) {
-      toast.add({
-        title: '发行失败',
-        description: toErrorMessage(err),
-        type: 'error',
-      })
+      toast.error(toErrorMessage(err), '发行失败')
     } finally {
       setIsExecuting(false)
     }
