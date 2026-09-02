@@ -8,12 +8,12 @@ import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
 import { getTokensByCreator, type TokenDetail } from '@/api/token'
 import { Button } from '@/components/ui/button'
-import { EditTokenModal } from '@/components/dashboard/edit-token-modal'
 import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
 import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 import { formatTokenSupply } from '@/lib/format'
 import { useLocale } from '@/lib/i18n'
+import { DEFAULT_CHAIN_ID } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 
 const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
@@ -23,7 +23,6 @@ export const Dashboard = () => {
   const { locale } = useLocale()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [editingToken, setEditingToken] = useState<TokenDetail | null>(null)
   const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
 
   const {
@@ -45,7 +44,7 @@ export const Dashboard = () => {
     address: firstIssued?.coinContractAddress as `0x${string}` | undefined,
     abi: FlapTaxTokenV3Abi,
     functionName: 'totalSupply',
-    chainId: 97,
+    chainId: DEFAULT_CHAIN_ID,
     query: {
       enabled: Boolean(firstIssued),
       staleTime: Infinity,
@@ -59,6 +58,12 @@ export const Dashboard = () => {
   const handlePresale = (token: TokenDetail) => {
     const tokenAddr = token.coinContractAddress
     if (tokenAddr) navigate(`/presale?address=${tokenAddr}`)
+  }
+
+  const handleEdit = (token: TokenDetail) => {
+    if (token.id) {
+      navigate(`/launch?id=${token.id}`)
+    }
   }
 
   const handleLaunch = (token: TokenDetail) => {
@@ -201,21 +206,13 @@ export const Dashboard = () => {
               key={token.id || token.coinContractAddress}
               token={token}
               totalSupplyText={totalSupplyText}
-              onEdit={(t) => setEditingToken(t)}
+              onEdit={handleEdit}
               onPresale={handlePresale}
               onLaunch={handleLaunch}
               onClaim={handleClaim}
             />
           ))}
         </div>
-      )}
-
-      {editingToken && (
-        <EditTokenModal
-          token={editingToken}
-          onClose={() => setEditingToken(null)}
-          onSuccess={() => void refetch()}
-        />
       )}
 
       {issuingToken && (

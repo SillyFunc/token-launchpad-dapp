@@ -19,6 +19,7 @@ import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
 import { TokenRow } from '@/components/board/token-row'
 import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
+import { DEFAULT_CHAIN_ID } from '@/config/network'
 
 const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
 
@@ -66,7 +67,7 @@ export const Board = () => {
     address: supplyToken?.coinContractAddress as `0x${string}` | undefined,
     abi: FlapTaxTokenV3Abi,
     functionName: 'totalSupply',
-    chainId: 97,
+    chainId: DEFAULT_CHAIN_ID,
     query: {
       enabled: Boolean(supplyToken),
       staleTime: Infinity,

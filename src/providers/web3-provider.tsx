@@ -1,11 +1,12 @@
 import { WagmiProvider, createConfig, http, injected, fallback } from 'wagmi'
-import { bsc, bscTestnet } from 'wagmi/chains'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConnectKitProvider } from 'connectkit'
 import { walletConnect } from 'wagmi/connectors'
 
+import { CHAINS_CONFIG, SUPPORTED_CHAINS } from '@/config/network'
+
 const config = createConfig({
-  chains: [bscTestnet, bsc],
+  chains: SUPPORTED_CHAINS,
   connectors: [
     injected(),
     walletConnect({
@@ -14,16 +15,8 @@ const config = createConfig({
     }),
   ],
   transports: {
-    [bscTestnet.id]: fallback([
-      http('https://bsc-testnet-rpc.publicnode.com'),
-      http('https://bsc-testnet.blockpi.network/v1/rpc/public'),
-      http('https://data-seed-prebsc-1-s1.binance.org:8545/'),
-    ]),
-    [bsc.id]: fallback([
-      http('https://binance.llamarpc.com'),
-      http('https://bsc-dataseed.binance.org/'),
-      http('https://1rpc.io/bnb'),
-    ]),
+    [97]: fallback(CHAINS_CONFIG[97].rpcUrls.http.map((url) => http(url))),
+    [56]: fallback(CHAINS_CONFIG[56].rpcUrls.http.map((url) => http(url))),
   },
 })
 

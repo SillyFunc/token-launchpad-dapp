@@ -9,16 +9,18 @@ interface BlockedAction {
 }
 
 interface BlockedStateProps {
+  title?: string
   reason: string
   isLoading?: boolean
   primaryAction?: BlockedAction
 }
 
 /**
- * 阻塞态内容 — 当代币不满足开启预售的前置条件时展示。
+ * 阻塞态内容 — 当代币不满足操作前置条件时展示。
  * 仅提示 + 引导跳转，不渲染任何表单。Card 容器由父组件提供。
  */
 export function BlockedState({
+  title,
   reason,
   isLoading = false,
   primaryAction,
@@ -35,7 +37,7 @@ export function BlockedState({
 
       <div className="flex flex-col gap-1.5">
         <h3 className="text-base font-bold text-white">
-          {isLoading ? '正在校验链上状态…' : '暂不可配置预售'}
+          {isLoading ? '正在校验链上状态…' : title || '暂不可进行此操作'}
         </h3>
         {!isLoading && reason && (
           <p className="max-w-sm text-xs leading-relaxed text-neutral-400">

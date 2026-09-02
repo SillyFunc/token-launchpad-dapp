@@ -17,7 +17,10 @@ import { NumericInput } from '@/components/ui/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import { savePresaleInfo } from '@/api/token'
 import { getSignMessage } from '@/api/auth'
-import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
+import {
+  DEFAULT_CHAIN_ID,
+  getContractAddresses,
+} from '@/config/network'
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
 
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
@@ -71,7 +74,7 @@ export function PresaleForm({ tokenAddress, address }: PresaleFormProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const config = useConfig()
-  const coordinator = CONTRACT_ADDRESSES[97].coordinatorFactory
+  const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
   const form = useForm({
     defaultValues: {
@@ -128,7 +131,7 @@ export function PresaleForm({ tokenAddress, address }: PresaleFormProps) {
           address: coordinator,
           abi: CoordinatorFactoryAbi,
           functionName: 'setupPresale',
-          chainId: 97,
+          chainId: DEFAULT_CHAIN_ID,
           args: [
             tokenAddress,
             {
@@ -147,7 +150,7 @@ export function PresaleForm({ tokenAddress, address }: PresaleFormProps) {
           value: creatorBuyBnbWei > 0n ? creatorBuyBnbWei : undefined,
         })
 
-        await waitForTransactionReceipt(config, { hash, chainId: 97 })
+        await waitForTransactionReceipt(config, { hash, chainId: DEFAULT_CHAIN_ID })
 
         toast.success('预售条款已配置，前往控制台开启认购')
         queryClient.invalidateQueries({ queryKey: ['creatorTokens', address] })

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConnection, useConfig, useReadContract } from 'wagmi'
+import { useConnection, useConfig } from 'wagmi'
 import { signMessage, writeContract, waitForTransactionReceipt } from '@wagmi/core'
-import { zeroAddress, type Abi } from 'viem'
+import { type Abi } from 'viem'
 import {
   Coins,
   Copy,
@@ -33,12 +33,11 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { formatAddress } from '@/lib/format'
-import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
 import PresaleAbiJson from '@/contracts/abi/Presale.json'
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import { useTokenGate } from '@/hooks/use-token-gate'
+import { DEFAULT_CHAIN_ID, getExplorerUrl } from '@/config/network'
 
 const PresaleAbi = PresaleAbiJson as unknown as Abi
-const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
 function TwitterIcon({ className }: { className?: string }) {
   return (
@@ -75,49 +74,19 @@ export function TokenCard({
   const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
   const [isClaiming, setIsClaiming] = useState(false)
-  const isIssued = Boolean(token.coinContractAddress)
+
+  // 统一代币门禁守卫
+  const {
+    isIssued,
+    presaleAddress,
+    tokensClaimed,
+    canEdit,
+    canIssue,
+    canClaimAll,
+    canSetupPresale,
+  } = useTokenGate({ token })
+
   const tokenAddress = token.coinContractAddress || ''
-
-  const presaleAddress = useReadContract({
-    address: CONTRACT_ADDRESSES[97].coordinatorFactory,
-    abi: CoordinatorFactoryAbi,
-    functionName: 'getTokenPresale',
-    args: [tokenAddress as `0x${string}`],
-    chainId: 97,
-    query: { enabled: isIssued, staleTime: 30_000 },
-  }).data as `0x${string}` | undefined
-
-  const presaleExists = Boolean(
-    presaleAddress && presaleAddress !== zeroAddress,
-  )
-
-  const launchStatus = useReadContract({
-    address: presaleAddress && presaleExists ? presaleAddress : undefined,
-    abi: PresaleAbi,
-    functionName: 'getLaunchStatus',
-    chainId: 97,
-    query: { enabled: presaleExists, staleTime: 30_000 },
-  }).data as
-    | readonly [boolean, bigint, bigint, bigint, boolean, boolean]
-    | undefined
-
-  const presaleOwner = useReadContract({
-    address: presaleAddress && presaleExists ? presaleAddress : undefined,
-    abi: PresaleAbi,
-    functionName: 'owner',
-    chainId: 97,
-    query: { enabled: presaleExists, staleTime: 30_000 },
-  }).data as `0x${string}` | undefined
-
-  const tokensClaimed = Boolean(launchStatus && launchStatus[5])
-
-  const showClaimButton = Boolean(
-    presaleExists &&
-    launchStatus &&
-    !launchStatus[0] && // enabled
-    !tokensClaimed &&
-    presaleOwner === connectedAddress, // isCreator
-  )
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -128,15 +97,12 @@ export function TokenCard({
   }
 
   const handleClaimTokens = async () => {
+    if (!canClaimAll.allowed) {
+      toast.error(canClaimAll.reason || '当前不可领取代币')
+      return
+    }
     if (!connectedAddress || !presaleAddress) return
-    if (launchStatus && launchStatus[0]) {
-      toast.error('预售已开启，无法领取代币')
-      return
-    }
-    if (launchStatus && launchStatus[5]) {
-      toast.error('代币已领取，不可重复领取')
-      return
-    }
+
     setIsClaiming(true)
     try {
       const message = await getSignMessage(connectedAddress)
@@ -145,9 +111,9 @@ export function TokenCard({
         address: presaleAddress,
         abi: PresaleAbi,
         functionName: 'claimAllTokens',
-        chainId: 97,
+        chainId: DEFAULT_CHAIN_ID,
       })
-      await waitForTransactionReceipt(config, { hash, chainId: 97 })
+      await waitForTransactionReceipt(config, { hash, chainId: DEFAULT_CHAIN_ID })
       queryClient.invalidateQueries()
       toast.success('请关注您钱包里的代币余额', '领取成功')
       onClaim(token)
@@ -158,6 +124,13 @@ export function TokenCard({
     } finally {
       setIsClaiming(false)
     }
+  }
+
+  const handlePresaleClick = () => {
+    if (!canSetupPresale.allowed && canSetupPresale.reason) {
+      toast.warning(canSetupPresale.reason)
+    }
+    onPresale(token)
   }
 
   return (
@@ -207,7 +180,7 @@ export function TokenCard({
                       )}
                     </button>
                     <a
-                      href={`https://testnet.bscscan.com/address/${tokenAddress}`}
+                      href={getExplorerUrl(tokenAddress, 'address')}
                       target="_blank"
                       rel="noreferrer"
                       className="text-neutral-400 transition-colors hover:text-[#FFA546]"
@@ -327,15 +300,22 @@ export function TokenCard({
         </CardContent>
       </div>
 
-      {(isIssued ? showClaimButton || !tokensClaimed : true) && (
+      {(isIssued ? canClaimAll.allowed || !tokensClaimed : true) && (
         <CardFooter className="flex items-center justify-end gap-2.5 border-t border-[#2F3737] bg-[#16181a] p-3">
           {!isIssued && (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onEdit(token)}
-              className="h-8 cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white"
+              onClick={() => {
+                if (!canEdit.allowed) {
+                  toast.error(canEdit.reason || '无法编辑代币资料')
+                  return
+                }
+                onEdit(token)
+              }}
+              disabled={!canEdit.allowed}
+              className="h-8 cursor-pointer rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-[#25282c] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Edit3 className="size-3.5" />
               编辑信息
@@ -343,7 +323,7 @@ export function TokenCard({
           )}
           {isIssued ? (
             <>
-              {showClaimButton && (
+              {canClaimAll.allowed && (
                 <Button
                   type="button"
                   variant="outline"
@@ -364,7 +344,7 @@ export function TokenCard({
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => onPresale(token)}
+                  onClick={handlePresaleClick}
                   className="h-8 cursor-pointer rounded bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white transition-transform active:translate-y-0.5"
                 >
                   <Rocket className="size-3.5" />
@@ -376,8 +356,15 @@ export function TokenCard({
             <Button
               type="button"
               size="sm"
-              onClick={() => onLaunch(token)}
-              className="h-8 cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white transition-transform active:translate-y-0.5"
+              onClick={() => {
+                if (!canIssue.allowed) {
+                  toast.error(canIssue.reason || '无法发行代币')
+                  return
+                }
+                onLaunch(token)
+              }}
+              disabled={!canIssue.allowed}
+              className="h-8 cursor-pointer rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Rocket className="size-3.5" />
               我要发行

@@ -33,6 +33,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { formatAddress } from '@/lib/format'
+import { useTokenGate } from '@/hooks/use-token-gate'
+import {
+  DEFAULT_CHAIN_ID,
+  getExplorerUrl,
+  getTargetChainName,
+} from '@/config/network'
 
 const ERROR_MESSAGES: Record<CoordinatorErrorCode, string> = {
   USER_REJECTED: '用户已取消交易',
@@ -76,6 +82,7 @@ export function IssueTokenModal({
   const config = useConfig()
   const { formattedFee } = useCreationFee()
   const { execute: createToken } = useCreateToken()
+  const { canIssue } = useTokenGate({ token })
 
   const [copied, setCopied] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
@@ -91,6 +98,10 @@ export function IssueTokenModal({
   }
 
   const handleExecute = async () => {
+    if (!canIssue.allowed) {
+      toast.error(canIssue.reason || '当前代币不可发行')
+      return
+    }
     if (!address) {
       toast.error('请先连接钱包')
       return
@@ -221,7 +232,7 @@ export function IssueTokenModal({
             <div className="flex items-center justify-between py-2.5">
               <span className="text-neutral-400">发行网络</span>
               <span className="font-semibold text-white">
-                BSC Testnet (ChainId: 97)
+                {getTargetChainName(DEFAULT_CHAIN_ID)}
               </span>
             </div>
 
@@ -265,7 +276,7 @@ export function IssueTokenModal({
                     )}
                   </button>
                   <a
-                    href={`https://testnet.bscscan.com/address/${issuedTokenAddress}`}
+                    href={getExplorerUrl(issuedTokenAddress, 'address')}
                     target="_blank"
                     rel="noreferrer"
                     className="text-neutral-400 hover:text-white"
@@ -318,9 +329,9 @@ export function IssueTokenModal({
               <Button
                 type="button"
                 size="sm"
-                disabled={isExecuting}
+                disabled={isExecuting || !canIssue.allowed}
                 onClick={handleExecute}
-                className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
               >
                 {isExecuting ? (
                   <>

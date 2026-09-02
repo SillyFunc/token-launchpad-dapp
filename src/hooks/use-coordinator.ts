@@ -14,7 +14,10 @@ import {
 } from 'viem'
 
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
-import { CONTRACT_ADDRESSES, getContractAddresses } from '@/contracts/addresses'
+import {
+  DEFAULT_CHAIN_ID,
+  getContractAddresses,
+} from '@/config/network'
 
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
@@ -112,14 +115,14 @@ function toCoordinatorError(err: unknown): CoordinatorError {
   return err as CoordinatorError
 }
 
-/** 按当前钱包网络解析 CoordinatorFactory 地址（缺省降级为 BSC 测试网 97） */
+/** 按当前钱包网络解析 CoordinatorFactory 地址（缺省降级为默认网络） */
 function useCoordinatorFactory() {
   const chainId = useChainId()
   const { chainId: connChainId } = useConnection()
-  const effectiveChainId = connChainId || chainId || 97
+  const effectiveChainId = connChainId || chainId || DEFAULT_CHAIN_ID
   return (
     getContractAddresses(effectiveChainId)?.coordinatorFactory ??
-    CONTRACT_ADDRESSES[97].coordinatorFactory
+    getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
   )
 }
 
@@ -130,7 +133,7 @@ export function useCreationFee() {
     address,
     abi: CoordinatorFactoryAbi,
     functionName: 'creationFee',
-    chainId: 97,
+    chainId: DEFAULT_CHAIN_ID,
     query: {
       enabled: Boolean(address),
       staleTime: 30_000,
@@ -158,10 +161,10 @@ export function useCreateToken() {
   const execute = async (
     params: CreateTokenParams,
   ): Promise<CreateTokenResult> => {
-    // 1. 确保钱包当前处于 BSC 测试网 (97)，若不是则自动发起网络切换
-    if (config.state.chainId !== 97) {
+    // 1. 确保钱包当前处于目标网络，若不是则自动发起网络切换
+    if (config.state.chainId !== DEFAULT_CHAIN_ID) {
       try {
-        await switchChain(config, { chainId: 97 })
+        await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
       } catch (err) {
         throw new CoordinatorError('WRONG_NETWORK', err)
       }
@@ -186,7 +189,7 @@ export function useCreateToken() {
           address: coordinatorFactory,
           abi: CoordinatorFactoryAbi,
           functionName: 'creationFee',
-          chainId: 97,
+          chainId: DEFAULT_CHAIN_ID,
         })) as bigint
       } catch (readErr) {
         console.warn('Direct readContract creationFee failed:', readErr)
@@ -197,12 +200,12 @@ export function useCreateToken() {
       fee = 5000000000000000n
     }
 
-    // 4. 显式指定 chainId: 97 发起合约调用
+    // 4. 显式指定目标 chainId 发起合约调用
     const hash = await writeContract(config, {
       address: coordinatorFactory,
       abi: CoordinatorFactoryAbi,
       functionName: 'createToken',
-      chainId: 97,
+      chainId: DEFAULT_CHAIN_ID,
       args: [
         {
           name: params.name.trim(),
@@ -223,7 +226,7 @@ export function useCreateToken() {
     // 5. 等待区块确认
     const receipt = await waitForTransactionReceipt(config, {
       hash,
-      chainId: 97,
+      chainId: DEFAULT_CHAIN_ID,
     })
 
     // 6. 解析 TokenPresalePairCreated 事件

@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
+import { useTokenGate } from '@/hooks/use-token-gate'
 
 const optionalUrl = z.union([
   z.literal(''),
@@ -84,6 +85,7 @@ export function EditTokenModal({
 }: EditTokenModalProps) {
   const { address } = useConnection()
   const config = useConfig()
+  const { canEdit } = useTokenGate({ token })
 
   // Logo 上传状态
   const [logoFile, setLogoFile] = useState<File | null>(null)
@@ -118,6 +120,10 @@ export function EditTokenModal({
       },
     },
     onSubmit: async ({ value }) => {
+      if (!canEdit.allowed) {
+        toast.error(canEdit.reason || '当前代币不可编辑')
+        return
+      }
       if (!address) {
         toast.error('请先连接钱包')
         return
@@ -590,7 +596,7 @@ export function EditTokenModal({
             </Button>
             <form.Subscribe
               selector={(state) => ({
-                canSubmit: state.canSubmit && !state.isSubmitting,
+                canSubmit: state.canSubmit && !state.isSubmitting && canEdit.allowed,
                 isSubmitting: state.isSubmitting,
               })}
             >

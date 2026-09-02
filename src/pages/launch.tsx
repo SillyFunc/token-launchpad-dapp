@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, type ChangeEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useForm } from '@tanstack/react-form'
+import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
 import { isAddress } from 'viem'
 import { useConfig, useConnection } from 'wagmi'
@@ -12,8 +13,16 @@ import { TaxSlider } from '@/components/common/tax-slider'
 import { NumericInput } from '@/components/ui/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
-import { saveTokenInfo, uploadTokenLogo } from '@/api/token'
+import {
+  saveTokenInfo,
+  updateTokenInfo,
+  uploadTokenLogo,
+  getTokenDetailById,
+  type TokenDetail,
+} from '@/api/token'
 import { getSignMessage } from '@/api/auth'
+import { useTokenGate } from '@/hooks/use-token-gate'
+import { BlockedState } from '@/components/presale/blocked-state'
 
 const optionalUrl = z.union([
   z.literal(''),
@@ -61,72 +70,122 @@ const linkFields = [
   { label: '网站链接', key: 'website' },
 ] as const
 
-export const Launch = () => {
+interface LaunchFormProps {
+  initialData?: TokenDetail | null
+  editId?: string | null
+}
+
+function LaunchForm({ initialData, editId }: LaunchFormProps) {
+  const isEditMode = Boolean(editId && initialData)
+  const navigate = useNavigate()
   const { address } = useConnection()
   const config = useConfig()
   const [logoFile, setLogoFile] = useState<File | null>(null)
-  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(
+    initialData?.coinImg || null,
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 预览用 objectURL，组件卸载时释放
   useEffect(
     () => () => {
-      if (logoPreview) URL.revokeObjectURL(logoPreview)
+      if (logoPreview && logoPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(logoPreview)
+      }
     },
     [logoPreview],
   )
 
-  // 表单状态管理
+  // 表单状态管理：以 initialData 真实数据完整初始化
   const form = useForm({
     defaultValues: {
-      name: '',
-      symbol: '',
-      description: '',
-      feeRecipient: address ?? '',
-      buyTax: 0,
-      sellTax: 0,
-      taxDuration: '30',
-      antiFarmerDuration: '0',
+      name: initialData?.name ?? '',
+      symbol: initialData?.symbol ?? '',
+      description: initialData?.meta || initialData?.zhIntroduction || '',
+      feeRecipient: initialData?.feeRecipient || address || '',
+      buyTax: initialData?.buyTax ?? 0,
+      sellTax: initialData?.sellTax ?? 0,
+      taxDuration: String(initialData?.taxDuration ?? '30'),
+      antiFarmerDuration: String(initialData?.antiFarmerDuration ?? '0'),
       links: {
-        telegram: '',
-        twitter: '',
-        website: '',
+        telegram: initialData?.telegram ?? '',
+        twitter: initialData?.twitter ?? '',
+        website: initialData?.website ?? '',
       },
     },
     onSubmit: async ({ value }) => {
-      if (!logoFile) {
+      if (!isEditMode && !logoFile) {
+        toast.error('请上传代币 Logo')
+        return
+      }
+      if (isEditMode && !logoFile && !logoPreview) {
         toast.error('请上传代币 Logo')
         return
       }
       if (!address) return
+
       try {
+        let coinImg = logoPreview ?? ''
+        if (logoFile) {
+          coinImg = await uploadTokenLogo(logoFile)
+        }
         const message = await getSignMessage(address)
         const signature = await signMessage(config, { message })
-        const coinImg = await uploadTokenLogo(logoFile)
-        await saveTokenInfo({
-          name: value.name,
-          coinImg,
-          symbol: value.symbol,
-          meta: value.description,
-          buyTax: value.buyTax,
-          sellTax: value.sellTax,
-          feeRecipient: value.feeRecipient,
-          taxDuration: Number(value.taxDuration),
-          antiFarmerDuration: Number(value.antiFarmerDuration),
-          liqExpectedOutputAmount: 0,
-          launchType: 2,
-          website: value.links.website ?? '',
-          telegram: value.links.telegram ?? '',
-          twitter: value.links.twitter ?? '',
-          address,
-          message,
-          signature,
-        })
-        toast.success('创建成功！')
+
+        if (isEditMode && editId) {
+          await updateTokenInfo({
+            id: editId,
+            name: value.name.trim(),
+            coinImg,
+            symbol: value.symbol.trim(),
+            meta: value.description.trim(),
+            buyTax: Number(value.buyTax),
+            sellTax: Number(value.sellTax),
+            feeRecipient: value.feeRecipient.trim(),
+            taxDuration: Number(value.taxDuration),
+            antiFarmerDuration: Number(value.antiFarmerDuration),
+            liqExpectedOutputAmount: 0,
+            launchType: initialData?.launchType || 2,
+            website: value.links.website?.trim() ?? '',
+            telegram: value.links.telegram?.trim() ?? '',
+            twitter: value.links.twitter?.trim() ?? '',
+            address,
+            message,
+            signature,
+          })
+          toast.success('代币信息修改已保存！')
+        } else {
+          await saveTokenInfo({
+            name: value.name.trim(),
+            coinImg,
+            symbol: value.symbol.trim(),
+            meta: value.description.trim(),
+            buyTax: Number(value.buyTax),
+            sellTax: Number(value.sellTax),
+            feeRecipient: value.feeRecipient.trim(),
+            taxDuration: Number(value.taxDuration),
+            antiFarmerDuration: Number(value.antiFarmerDuration),
+            liqExpectedOutputAmount: 0,
+            launchType: 2,
+            website: value.links.website?.trim() ?? '',
+            telegram: value.links.telegram?.trim() ?? '',
+            twitter: value.links.twitter?.trim() ?? '',
+            address,
+            message,
+            signature,
+          })
+          toast.success('创建成功！')
+        }
+
+        navigate('/dashboard')
       } catch (err: unknown) {
         const message =
-          err instanceof Error ? err.message : '创建失败，请稍后再试'
-        toast.error(message, '创建失败')
+          err instanceof Error
+            ? err.message
+            : isEditMode
+              ? '保存修改失败，请稍后再试'
+              : '创建失败，请稍后再试'
+        toast.error(message, isEditMode ? '保存失败' : '创建失败')
       }
     },
   })
@@ -138,7 +197,9 @@ export const Launch = () => {
       toast.error('文件大小不能超过 3 MB')
       return
     }
-    if (logoPreview) URL.revokeObjectURL(logoPreview)
+    if (logoPreview && logoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(logoPreview)
+    }
     setLogoFile(file)
     setLogoPreview(URL.createObjectURL(file))
   }
@@ -167,26 +228,28 @@ export const Launch = () => {
           />
         </button>
         <span className="text-lg font-semibold text-white tracking-wide">
-          创建代币
+          {isEditMode ? '编辑代币信息' : '创建代币'}
         </span>
       </div>
 
       <div className="flex flex-col rounded border border-[#484b51] bg-[#131516]">
-        <div className="flex items-center justify-between border-b border-b-[#484b51] p-4">
-          <div>
-            <div className="text-xs font-bold text-white">保留您的代币 CA</div>
-            <div className="mt-1.5 text-xs text-neutral-500">
-              在发布前锁定您的代币合约的地址。
+        {!isEditMode && (
+          <div className="flex items-center justify-between border-b border-b-[#484b51] p-4">
+            <div>
+              <div className="text-xs font-bold text-white">保留您的代币 CA</div>
+              <div className="mt-1.5 text-xs text-neutral-500">
+                在发布前锁定您的代币合约的地址。
+              </div>
             </div>
+            <Link
+              to="/launch"
+              className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
+            >
+              保留 CA
+              <ArrowRight className="size-3 ml-1.5" />
+            </Link>
           </div>
-          <Link
-            to="/launch"
-            className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
-          >
-            保留 CA
-            <ArrowRight className="size-3 ml-1.5" />
-          </Link>
-        </div>
+        )}
 
         <div className="flex flex-col space-y-10 p-4">
           <div className="flex flex-col gap-6">
@@ -247,30 +310,30 @@ export const Launch = () => {
                     <path
                       d="M94.3333 130H76.6667C74.8986 130 73.2029 129.298 71.9526 128.047C70.7024 126.797 70 125.101 70 123.333V76.6667C70 74.8986 70.7024 73.2029 71.9526 71.9526C73.2029 70.7024 74.8986 70 76.6667 70H123.333C125.101 70 126.797 70.7024 128.047 71.9526C129.298 73.2029 130 74.8986 130 76.6667V110L119.667 99.6667C118.412 98.4373 116.723 97.7525 114.967 97.7613C113.211 97.77 111.529 98.4715 110.287 99.7133L80 130"
                       stroke="#FE810B"
-                      stroke-width="1.25"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     ></path>
                     <path
                       d="M106.668 125L116.668 115L126.668 125"
                       stroke="#FE810B"
-                      stroke-width="1.25"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     ></path>
                     <path
                       d="M116.668 133.333V115"
                       stroke="#FE810B"
-                      stroke-width="1.25"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     ></path>
                     <path
                       d="M89.9987 96.6668C93.6806 96.6668 96.6654 93.6821 96.6654 90.0002C96.6654 86.3183 93.6806 83.3335 89.9987 83.3335C86.3168 83.3335 83.332 86.3183 83.332 90.0002C83.332 93.6821 86.3168 96.6668 89.9987 96.6668Z"
                       stroke="#FE810B"
-                      stroke-width="1.25"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     ></path>
                   </svg>
                 )}
@@ -614,7 +677,7 @@ export const Launch = () => {
             <>
               {!address && (
                 <p className="mb-2 text-xs text-neutral-400">
-                  请先连接钱包后再创建代币
+                  请先连接钱包后再{isEditMode ? '保存修改' : '创建代币'}
                 </p>
               )}
 
@@ -626,10 +689,10 @@ export const Launch = () => {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="size-5 animate-spin" />
-                    <span>创建中…</span>
+                    <span>{isEditMode ? '保存中…' : '创建中…'}</span>
                   </>
                 ) : (
-                  <span>创建代币</span>
+                  <span>{isEditMode ? '保存修改' : '创建代币'}</span>
                 )}
               </button>
             </>
@@ -637,5 +700,139 @@ export const Launch = () => {
         </form.Subscribe>
       </div>
     </form>
+  )
+}
+
+export const Launch = () => {
+  const [searchParams] = useSearchParams()
+  const editId = searchParams.get('id') || searchParams.get('edit')
+  const isEditMode = Boolean(editId)
+
+  // 编辑模式：拉取草稿详情
+  const {
+    data: tokenDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+  } = useQuery({
+    queryKey: ['tokenDetailById', editId],
+    queryFn: () => getTokenDetailById(editId!),
+    enabled: isEditMode,
+  })
+
+  // 代币门禁守卫（校验已发行状态与创建者权限）
+  const { canEdit, isChainLoading } = useTokenGate({
+    token: tokenDetail,
+    tokenAddress: tokenDetail?.coinContractAddress,
+  })
+
+  // 编辑模式下的门禁与加载拦截
+  if (isEditMode) {
+    if (isDetailLoading || isChainLoading) {
+      return (
+        <div className="relative mx-auto flex w-full flex-col pb-28 pt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              aria-label="返回"
+              onClick={() => window.history.back()}
+              className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
+            >
+              <img
+                src={titleBackArrow}
+                alt=""
+                aria-hidden="true"
+                className="w-full h-full object-cover"
+              />
+            </button>
+            <span className="text-lg font-semibold text-white tracking-wide">
+              编辑代币信息
+            </span>
+          </div>
+          <div className="rounded border border-[#484b51] bg-[#131516] p-8">
+            <BlockedState
+              title="正在加载代币数据…"
+              reason=""
+              isLoading={true}
+            />
+          </div>
+        </div>
+      )
+    }
+
+    if (isDetailError || !tokenDetail) {
+      return (
+        <div className="relative mx-auto flex w-full flex-col pb-28 pt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              aria-label="返回"
+              onClick={() => window.history.back()}
+              className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
+            >
+              <img
+                src={titleBackArrow}
+                alt=""
+                aria-hidden="true"
+                className="w-full h-full object-cover"
+              />
+            </button>
+            <span className="text-lg font-semibold text-white tracking-wide">
+              编辑代币信息
+            </span>
+          </div>
+          <div className="rounded border border-[#484b51] bg-[#131516] p-8">
+            <BlockedState
+              title="代币信息不存在"
+              reason="未能检索到该代币的草稿信息，请返回控制台。"
+              primaryAction={{ label: '前往控制台', to: '/dashboard' }}
+            />
+          </div>
+        </div>
+      )
+    }
+
+    // 关键门禁：已发行代币不允许编辑信息（合约参数已被固化）
+    if (!canEdit.allowed) {
+      return (
+        <div className="relative mx-auto flex w-full flex-col pb-28 pt-6">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              aria-label="返回"
+              onClick={() => window.history.back()}
+              className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
+            >
+              <img
+                src={titleBackArrow}
+                alt=""
+                aria-hidden="true"
+                className="w-full h-full object-cover"
+              />
+            </button>
+            <span className="text-lg font-semibold text-white tracking-wide">
+              编辑代币信息
+            </span>
+          </div>
+          <div className="rounded border border-[#484b51] bg-[#131516] p-8">
+            <BlockedState
+              title="不可编辑代币信息"
+              reason={
+                canEdit.reason ??
+                '该代币已在链上部署发行，合约参数已被固化，无法再编辑资料。'
+              }
+              primaryAction={{ label: '前往控制台', to: '/dashboard' }}
+            />
+          </div>
+        </div>
+      )
+    }
+  }
+
+  return (
+    <LaunchForm
+      key={editId ? String(tokenDetail?.id || editId) : 'new'}
+      initialData={tokenDetail}
+      editId={editId}
+    />
   )
 }

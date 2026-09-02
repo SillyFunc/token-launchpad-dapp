@@ -7,10 +7,18 @@ import {
   type Address,
   type PublicClient,
 } from 'viem'
-import { bscTestnet } from 'viem/chains'
+import {
+  DEFAULT_CHAIN,
+  DEFAULT_CHAIN_ID,
+  getChainConfig,
+  getContractAddresses,
+} from '@/config/network'
 
-export const COORDINATOR = '0xFD20244a99d4331E842e91F04C75032d427B76DD' as Address
-export const WBNB = '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd' as Address
+const chainConfig = getChainConfig(DEFAULT_CHAIN_ID)
+const addresses = getContractAddresses(DEFAULT_CHAIN_ID)
+
+export const COORDINATOR = addresses.coordinatorFactory as Address
+export const WBNB = addresses.wbnb as Address
 
 export const coordinatorAbi = parseAbi([
   'function tokenPresales(address) view returns (address)',
@@ -35,9 +43,10 @@ export const tokenAbi = parseAbi([
 let readClient: PublicClient | undefined
 export function getReadClient(): PublicClient {
   if (!readClient) {
+    const rpc = chainConfig.rpcUrls.http[0]
     readClient = createPublicClient({
-      chain: bscTestnet,
-      transport: http('https://bsc-testnet-rpc.publicnode.com'),
+      chain: DEFAULT_CHAIN,
+      transport: http(rpc),
     })
   }
   return readClient
@@ -46,9 +55,11 @@ export function getReadClient(): PublicClient {
 let watchClient: PublicClient | undefined
 export function getWatchClient(): PublicClient {
   if (!watchClient) {
+    const wsRpc =
+      chainConfig.rpcUrls.webSocket?.[0] || chainConfig.rpcUrls.http[0]
     watchClient = createPublicClient({
-      chain: bscTestnet,
-      transport: webSocket('wss://bsc-testnet-rpc.publicnode.com'),
+      chain: DEFAULT_CHAIN,
+      transport: wsRpc.startsWith('ws') ? webSocket(wsRpc) : http(wsRpc),
     })
   }
   return watchClient

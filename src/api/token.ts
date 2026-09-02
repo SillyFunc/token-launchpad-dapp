@@ -173,6 +173,17 @@ export function getTokenByContractAddress(
   )
 }
 
+export function getTokenDetailById(
+  id: number | string,
+  config?: AxiosRequestConfig,
+) {
+  return post<TokenDetail>(
+    'deposit/exSwap/swapCoinIssuedDetail',
+    { id },
+    config,
+  )
+}
+
 export interface PresaleConfigPayload {
   presaleTokenPrice: string
   maxBuyPerWallet: string
