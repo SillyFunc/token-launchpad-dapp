@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router'
 import { useConnection, useConfig } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  signMessage,
   writeContract,
   readContract,
   waitForTransactionReceipt,
   switchChain,
 } from '@wagmi/core'
-import { parseEther, type Abi } from 'viem'
+import { type Abi } from 'viem'
 import {
   Coins,
   Rocket,
@@ -19,7 +18,6 @@ import {
 } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
-import { getSignMessage } from '@/api/auth'
 import {
   Dialog,
   DialogContent,
@@ -47,13 +45,6 @@ const KNOWN_ERRORS: Record<string, string> = {
   TokenNotRegistered: '代币未在本平台登记',
   NotTokenCreator: '仅代币创建者可操作',
   AlreadyConfigured: '预售条款已在链上配置，不可重复修改',
-  InvalidPrice: '预售价必须大于 0',
-  InvalidMaxBuyPerWallet: '单钱包上限必须大于 0',
-  CreatorBuyTokensWithoutFunding: '设置了代币购买目标但未附带购买注资',
-  InvalidVestingDelay: '释放周期须在 7 至 90 天之间',
-  InvalidVestingRate: '释放比例须在 5% 至 20% 之间',
-  SlippageTooHigh: '滑点不能超过 10%',
-  SoftCapTooLow: '软顶须不小于加池下限',
   PresaleNotOpen: '预售未开放',
   NoTokensToClaim: '托管仓无代币余额',
 }
@@ -74,9 +65,6 @@ function parseContractError(err: unknown): string {
     if (msg.includes('Ownable: caller is not the owner')) {
       return '仅代币所有者可操作'
     }
-    if (msg.includes('gas limit too high') || msg.includes('gas required exceeds')) {
-      return '链上模拟执行失败（合约校验不通过，请检查是否已配置过或参数是否满足约束）'
-    }
     for (const [name, text] of Object.entries(KNOWN_ERRORS)) {
       if (msg.includes(name)) return text
     }
@@ -91,6 +79,9 @@ export interface OpenPresaleModalProps {
   onSuccess: () => void
 }
 
+/**
+ * 开启预售确认弹窗 — 专心调用托管仓 presale.openPresale() 开启认购
+ */
 export function OpenPresaleModal({
   token,
   onClose,
@@ -135,7 +126,7 @@ export function OpenPresaleModal({
       const coordinator =
         getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
-      // 实时查询链上是否已经执行过 setupPresale
+      // 预检：若链上尚未配置预售，引导先去配置
       let isConfiguredOnChain = presaleConfigured
       try {
         isConfiguredOnChain = (await readContract(config, {
@@ -149,69 +140,14 @@ export function OpenPresaleModal({
         console.warn('Read tokenConfigured failed:', readErr)
       }
 
-      // ① 若链上尚未执行 setupPresale，先同步链上条款
       if (!isConfiguredOnChain) {
-        const hardcapWei = parseEther(String(token.hardcap || '0'))
-        const softcapWei = parseEther(
-          String(token.softcap || token.soft || '0'),
-        )
-        const minLiquidityWei = softcapWei
-        const priceWei = parseEther(
-          String(token.presaleTokenPrice || '0.001'),
-        )
-        const maxBuyWei = parseEther(
-          String(token.maxBuyPerWallet || '1000'),
-        )
-
-        // 释放周期换算：若大于 90 说明已是秒，否则作为天数换算为秒
-        const rawDelay = Number(token.vestingDelay) || 7
-        const vestingDelaySec =
-          rawDelay > 90 ? BigInt(rawDelay) : BigInt(rawDelay) * 86400n
-
-        const creatorBuyTokensWei = parseEther(
-          String(token.creatorBuyTokens || '0'),
-        )
-        let creatorBuyBnbWei = parseEther(
-          String(token.creatorBuyBnb || '0'),
-        )
-
-        // 防呆：若设置了购买代币目标但未填注资，自动按价格预估注资，防止合约报 CreatorBuyTokensWithoutFunding
-        if (creatorBuyTokensWei > 0n && creatorBuyBnbWei <= 0n) {
-          creatorBuyBnbWei =
-            (creatorBuyTokensWei * priceWei) / 1000000000000000000n
-        }
-
-        const startTime = BigInt(Number(token.startTime || 0))
-
-        const setupHash = await writeContract(config, {
-          address: coordinator,
-          abi: CoordinatorFactoryAbi,
-          functionName: 'setupPresale',
-          chainId: DEFAULT_CHAIN_ID,
-          args: [
-            tokenAddress as `0x${string}`,
-            {
-              presaleTokenPrice: priceWei,
-              maxBuyPerWallet: maxBuyWei,
-              hardcap: hardcapWei,
-              minLiquidityAmount: minLiquidityWei,
-              softCap: softcapWei,
-              startTime,
-              vestingDelay: vestingDelaySec,
-              vestingRate: BigInt(Number(token.vestingRate || 10)),
-              slippage: 0n,
-              creatorBuyTokens: creatorBuyTokensWei,
-            },
-          ],
-          value: creatorBuyBnbWei > 0n ? creatorBuyBnbWei : undefined,
-        })
-        await waitForTransactionReceipt(config, {
-          hash: setupHash,
-          chainId: DEFAULT_CHAIN_ID,
-        })
+        toast.warning('请先配置预售条款后再开启预售')
+        navigate(`/presale?id=${token.id}&address=${tokenAddress}`)
+        onClose()
+        return
       }
 
-      // ② 调用 presale.openPresale() 开启认购
+      // 直接调用 presale.openPresale() 开启认购
       const openHash = await writeContract(config, {
         address: presaleAddress,
         abi: PresaleAbi,
@@ -269,7 +205,7 @@ export function OpenPresaleModal({
             </DialogTitle>
           </div>
           <DialogDescription className="mt-1 text-xs text-neutral-400">
-            此操作将在区块链上锁定预售条款并启动认购，操作不可撤销，请核对参数。
+            此操作将正式开启预售认购通道，散户即可注入 BNB 认购代币。
           </DialogDescription>
         </DialogHeader>
 
@@ -358,8 +294,7 @@ export function OpenPresaleModal({
             <div className="flex items-start gap-2 border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
               <span>
-                预售一旦开启，预售条款将永久写入区块链且不可修改。认购期内散户即可存入
-                BNB 参与认购。
+                预售开启后即刻接受散户认购，达到软顶后即可结束认购并一键加池开盘。
               </span>
             </div>
           )}

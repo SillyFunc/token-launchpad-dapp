@@ -1,6 +1,6 @@
 import { useConnection, useReadContract, useWatchContractEvent } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
-import { isAddress, zeroAddress, type Abi, type Hex } from 'viem'
+import { isAddress, zeroAddress, parseEther, type Abi, type Hex } from 'viem'
 
 import type { TokenDetail } from '@/api/token'
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
@@ -88,17 +88,18 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const { address: userAddress, chainId } = useConnection()
   const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
-  // 解析并规范化代币合约地址
+  // 解析并规范化代币合约地址（仅取 coinContractAddress 或显式传入的 tokenAddress，绝不可取创建者钱包 address）
   const rawAddress =
     options?.tokenAddress ||
     options?.token?.coinContractAddress ||
-    options?.token?.address ||
     ''
   const validTokenAddress =
-    Boolean(rawAddress) && isAddress(String(rawAddress))
+    Boolean(rawAddress) &&
+    isAddress(String(rawAddress)) &&
+    String(rawAddress).toLowerCase() !== zeroAddress
       ? (String(rawAddress).toLowerCase() as Hex)
       : undefined
-  const isIssued = Boolean(validTokenAddress)
+  const hasValidTokenAddress = Boolean(validTokenAddress)
 
   const hasWallet = Boolean(userAddress)
   const isOnTestnet = chainId === DEFAULT_CHAIN_ID
@@ -109,7 +110,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   // ================= 链上状态读取（仅当已发行有效地址时发起） =================
 
-  // 1. 代币是否在平台登记
+  // 1. 代币是否在平台登记 (tokenExists)
   const {
     data: tokenExistsData,
     isLoading: isExistsLoading,
@@ -120,7 +121,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     functionName: 'tokenExists',
     args: [queryTokenAddress],
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: isIssued, staleTime: 30_000 },
+    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
   })
 
   // 2. 预售是否已经配置过（一次性，不可重复修改）
@@ -134,7 +135,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     functionName: 'tokenConfigured',
     args: [queryTokenAddress],
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: isIssued, staleTime: 10_000 },
+    query: { enabled: hasValidTokenAddress, staleTime: 10_000 },
   })
 
   // 3. 链上创建者地址
@@ -148,7 +149,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     functionName: 'tokenCreators',
     args: [queryTokenAddress],
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: isIssued, staleTime: 30_000 },
+    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
   })
 
   // 4. 代币对应的托管仓地址 (支持后端传参或链上查得)
@@ -162,7 +163,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     functionName: 'tokenPresales',
     args: [queryTokenAddress],
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: isIssued, staleTime: 30_000 },
+    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
   })
 
   const rawPresaleAddr =
@@ -266,7 +267,13 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   // ================= 状态解析与聚合 =================
 
-  const isChainLoading = isIssued
+  const tokenExists = Boolean(tokenExistsData)
+  // 是否已在链上真正发行：必须有有效合约地址，且 tokenExists 为 true
+  const isIssued = Boolean(
+    hasValidTokenAddress && (tokenExistsData !== undefined ? tokenExists : true),
+  )
+
+  const isChainLoading = hasValidTokenAddress
     ? isExistsLoading ||
       isConfiguredLoading ||
       isCreatorLoading ||
@@ -278,15 +285,13 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
           isHardCapLoading))
     : false
 
-  const isChainError = isIssued
+  const isChainError = hasValidTokenAddress
     ? isExistsError ||
       isConfiguredError ||
       isCreatorError ||
       isPresaleAddrError ||
       (hasPresaleContract && (isStatusError || isOwnerError))
     : false
-
-  const tokenExists = Boolean(tokenExistsData)
   const presaleConfigured = Boolean(isConfiguredData)
 
   // 兼容器件返回值：支持命名对象属性和数字数组索引两种解构
@@ -335,8 +340,25 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         ? Boolean(launchStatusData[0])
         : presaleStatus !== undefined && presaleStatus >= 1
 
-  const softCap = (softCapData as bigint | undefined) ?? 0n
-  const hardCap = (hardCapData as bigint | undefined) ?? 0n
+  const rawSoftCap = (softCapData as bigint | undefined) ?? 0n
+  const softCap =
+    rawSoftCap > 0n
+      ? rawSoftCap
+      : parseEther(
+          String(
+            options?.token?.softcap ||
+              options?.token?.soft ||
+              options?.token?.minLiquidityAmount ||
+              '0',
+          ),
+        )
+
+  const rawHardCap = (hardCapData as bigint | undefined) ?? 0n
+  const hardCap =
+    rawHardCap > 0n
+      ? rawHardCap
+      : parseEther(String(options?.token?.hardcap || '0'))
+
   const presaleShare = (presaleShareData as bigint | undefined) ?? 0n
 
   const isSoftCapReached = softCap > 0n && bnbAccumulated >= softCap
@@ -408,8 +430,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       return {
         allowed: false,
         reason:
-          '未在 URL 中指定有效的代币合约地址（?address=0x…），请从发行页面跳转进入。',
-        primaryAction: { label: '前往发行代币', to: '/launch' },
+          '该代币尚未在区块链上发行，无法配置预售。请先在控制台点击「我要发行」完成代币上链。',
+        primaryAction: { label: '前往控制台', to: '/dashboard' },
         isLoading: false,
       }
     }

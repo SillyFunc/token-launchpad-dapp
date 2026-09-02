@@ -86,6 +86,8 @@ export function TokenCard({
     isIssued,
     isChainLoading,
     presaleAddress,
+    presaleConfigured,
+    presaleEnabled,
     presaleStatus,
     tokensClaimed,
     bnbAccumulated,
@@ -93,7 +95,7 @@ export function TokenCard({
     presaleShare,
     softCap,
     hardCap,
-    isSoftCapReached,
+    isSoftCapReached: rawSoftCapReached,
     isSoldOut,
     canEdit,
     canIssue,
@@ -127,6 +129,10 @@ export function TokenCard({
     hardCap > 0n
       ? Number(formatEther(hardCap))
       : Number(token.hardcap || 0)
+
+  const isSoftCapReached =
+    rawSoftCapReached ||
+    (softCapNum > 0 && bnbAccumulatedNum >= softCapNum - 0.0001)
 
   const softCapPercent =
     softCapNum > 0
@@ -190,7 +196,10 @@ export function TokenCard({
       toast.error(canEndPresale.reason || '当前不可结束预售')
       return
     }
-    if (!connectedAddress || !presaleAddress) return
+    if (!connectedAddress || !presaleAddress) {
+      toast.error('请先连接钱包')
+      return
+    }
 
     setIsEnding(true)
     try {
@@ -374,8 +383,8 @@ export function TokenCard({
             </div>
           </div>
 
-          {/* 预售实时看板与多维进度条（展示在 CardContent 中） */}
-          {isIssued && (hasConfiguredPresale || presaleStatus !== undefined) && (
+          {/* 预售实时看板与多维进度条（严格仅在链上开启/配置了预售时展示） */}
+          {isIssued && presaleEnabled && (
             <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#17191b] p-3 text-xs">
               {/* 预售核心盘口参数（一行一条） */}
               <div className="flex flex-col divide-y divide-white/5 border-b border-white/5 pb-1 text-[11px]">
@@ -535,12 +544,11 @@ export function TokenCard({
         </CardContent>
       </div>
 
-      {(!isIssued ||
-        (isIssued &&
-          ((canClaimAll.allowed && !hasConfiguredPresale) ||
-            (!tokensClaimed && (isChainLoading || presaleStatus !== 1))))) && (
-        <CardFooter className="flex items-center justify-end gap-2 border-t border-[#2F3737] bg-[#16181a] p-3">
-          {!isIssued && (
+      {/* 底部操作区（无条件直接挂载，由内部状态精准分流） */}
+      <CardFooter className="flex items-center justify-end gap-2 border-t border-[#2F3737] bg-[#16181a] p-3">
+        {/* ================= 1. 未发行草稿阶段 ================= */}
+        {!isIssued && (
+          <>
             <Button
               type="button"
               variant="outline"
@@ -555,117 +563,8 @@ export function TokenCard({
               disabled={!canEdit.allowed}
             >
               <Edit3 />
-              <span>编辑信息</span>
+              <span>编辑代币信息</span>
             </Button>
-          )}
-          {isIssued ? (
-            <>
-              {canClaimAll.allowed && !hasConfiguredPresale && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="default"
-                  onClick={handleClaimTokens}
-                  disabled={isClaiming}
-                >
-                  {isClaiming ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Gift />
-                  )}
-                  <span>{isClaiming ? '领取中…' : '领取代币'}</span>
-                </Button>
-              )}
-              {!tokensClaimed && (
-                <>
-                  {/* 状态加载中 */}
-                  {isChainLoading && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="default"
-                      disabled
-                      className="opacity-50"
-                    >
-                      <Loader2 className="animate-spin" />
-                      <span>同步链上状态…</span>
-                    </Button>
-                  )}
-
-                  {/* 状态 0：未开启阶段 */}
-                  {!isChainLoading && (presaleStatus === 0 || presaleStatus === undefined) && (
-                    <>
-                      {hasConfiguredPresale ? (
-                        <>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="default"
-                            onClick={handlePresaleClick}
-                          >
-                            <Edit3 />
-                            <span>编辑预售信息</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="default"
-                            onClick={() => onOpenPresale(token)}
-                            className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
-                          >
-                            <Rocket />
-                            <span>开启预售</span>
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="default"
-                          onClick={handlePresaleClick}
-                          className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
-                        >
-                          <Rocket />
-                          <span>我要预售</span>
-                        </Button>
-                      )}
-                    </>
-                  )}
-
-                  {/* 状态 1：认购中阶段（无需在 CardFooter 中展示内容） */}
-                  {!isChainLoading && presaleStatus === 1 && null}
-
-                  {/* 状态 2：待加池开盘阶段 */}
-                  {!isChainLoading && presaleStatus === 2 && (
-                    <Button
-                      type="button"
-                      size="default"
-                      onClick={handleLaunchPool}
-                      disabled={isLaunching}
-                      className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-                    >
-                      {isLaunching ? (
-                        <Loader2 className="animate-spin" />
-                      ) : (
-                        <Rocket />
-                      )}
-                      <span>{isLaunching ? '开盘加池中…' : '一键开盘上线 (Launch)'}</span>
-                    </Button>
-                  )}
-
-                  {/* 状态 3：已开盘上线 */}
-                  {!isChainLoading && presaleStatus === 3 && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="default"
-                      disabled
-                    >
-                      <span>已上线交易</span>
-                    </Button>
-                  )}
-                </>
-              )}
-            </>
-          ) : (
             <Button
               type="button"
               size="default"
@@ -677,14 +576,133 @@ export function TokenCard({
                 onLaunch(token)
               }}
               disabled={!canIssue.allowed}
-              className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
+              className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
             >
               <Rocket />
               <span>我要发行</span>
             </Button>
-          )}
-        </CardFooter>
-      )}
+          </>
+        )}
+
+        {/* ================= 2. 已发行代币阶段 ================= */}
+        {isIssued && (
+          <>
+            {/* 状态加载中 */}
+            {isChainLoading && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="default"
+                disabled
+                className="opacity-50"
+              >
+                <Loader2 className="animate-spin" />
+                <span>同步链上状态…</span>
+              </Button>
+            )}
+
+            {/* 阶段 2：已发行未配置（未领取 且 链上未 setupPresale）—— 二选一出口 */}
+            {!isChainLoading && !tokensClaimed && !presaleConfigured && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="default"
+                  onClick={handleClaimTokens}
+                  disabled={isClaiming}
+                >
+                  {isClaiming ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Gift />
+                  )}
+                  <span>{isClaiming ? '领取中…' : '领取代币'}</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="default"
+                  onClick={handlePresaleClick}
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                >
+                  <Rocket />
+                  <span>设置预售</span>
+                </Button>
+              </>
+            )}
+
+            {/* 阶段 3：链上已设置预售（tokenConfigured=true），等待开闸认购 —— 只显示开启预售 */}
+            {!isChainLoading &&
+              !tokensClaimed &&
+              presaleConfigured &&
+              (presaleStatus === 0 || presaleStatus === undefined) && (
+                <Button
+                  type="button"
+                  size="default"
+                  onClick={() => onOpenPresale(token)}
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                >
+                  <Rocket />
+                  <span>开启预售</span>
+                </Button>
+              )}
+
+            {/* 阶段 3.5：认购中阶段（presaleStatus === 1）—— 达到软顶后展示「结束预售」按钮 */}
+            {!isChainLoading &&
+              !tokensClaimed &&
+              presaleStatus === 1 &&
+              isSoftCapReached && (
+                <Button
+                  type="button"
+                  size="default"
+                  onClick={handleEndPresale}
+                  disabled={isEnding}
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                >
+                  {isEnding ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Rocket />
+                  )}
+                  <span>{isEnding ? '结束中…' : '结束预售'}</span>
+                </Button>
+              )}
+
+            {/* 阶段 4：认购结束，待开盘加池 */}
+            {!isChainLoading &&
+              !tokensClaimed &&
+              presaleStatus === 2 && (
+                <Button
+                  type="button"
+                  size="default"
+                  onClick={handleLaunchPool}
+                  disabled={isLaunching}
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                >
+                  {isLaunching ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Rocket />
+                  )}
+                  <span>
+                    {isLaunching ? '开盘加池中…' : '一键开盘上线 (Launch)'}
+                  </span>
+                </Button>
+              )}
+
+            {/* 阶段 5：已开盘上线 或 代币已被一键领取 */}
+            {!isChainLoading && (presaleStatus === 3 || tokensClaimed) && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="default"
+                disabled
+              >
+                <span>{tokensClaimed ? '代币已领取' : '已上线交易'}</span>
+              </Button>
+            )}
+          </>
+        )}
+      </CardFooter>
     </Card>
   )
 }

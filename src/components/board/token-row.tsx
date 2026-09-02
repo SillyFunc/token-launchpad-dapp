@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router'
 import { Coins } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
@@ -13,6 +14,7 @@ export interface TokenRowProps {
 }
 
 export function TokenRow({ token, totalSupplyData, locale, bnbUsd }: TokenRowProps) {
+  const navigate = useNavigate()
   const tokenAddress = token.coinContractAddress || ''
   const { priceBNB, priceUSD, mcapUSD, tvlUSD, stage, changePercent } = useTokenPrice(
     tokenAddress as `0x${string}`,
@@ -42,7 +44,14 @@ export function TokenRow({ token, totalSupplyData, locale, bnbUsd }: TokenRowPro
       : '--'
 
   return (
-    <div className="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/5">
+    <div
+      onClick={() => {
+        if (tokenAddress) {
+          navigate(`/token/${tokenAddress}`)
+        }
+      }}
+      className="flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/5 cursor-pointer"
+    >
       <div className="flex min-w-0 items-center gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-white/30 bg-[#1a1c1e]">
           {token.coinImg ? (

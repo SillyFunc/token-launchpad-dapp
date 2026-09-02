@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from '@tanstack/react-form'
 import { useConfig } from 'wagmi'
-import { signMessage } from '@wagmi/core'
+import {
+  signMessage,
+  writeContract,
+  waitForTransactionReceipt,
+  switchChain,
+} from '@wagmi/core'
+import { parseEther, type Abi } from 'viem'
 import { Loader2, Info } from 'lucide-react'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
@@ -11,9 +17,53 @@ import { NumericInput } from '@/components/common/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import { updateTokenInfo, type TokenDetail } from '@/api/token'
 import { getSignMessage } from '@/api/auth'
-import { StartTimePicker } from '@/components/presale/start-time-picker'
 import { CreatorBuySection } from '@/components/presale/creator-buy-section'
+import {
+  DEFAULT_CHAIN_ID,
+  getContractAddresses,
+  getTargetChainName,
+} from '@/config/network'
+import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
 import { cn } from '@/lib/utils'
+
+const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
+
+const KNOWN_ERRORS: Record<string, string> = {
+  TokenNotRegistered: '代币未在本平台登记',
+  NotTokenCreator: '仅创建者可配置预售条款',
+  AlreadyConfigured: '预售条款已配置，不可重复修改',
+  InvalidPrice: '预售价必须大于 0',
+  InvalidMaxBuyPerWallet: '单钱包上限必须大于 0',
+  CreatorBuyTokensWithoutFunding: '设置了购买代币目标但未附带购买注资',
+  InvalidVestingDelay: '释放周期须在 7 至 90 天之间',
+  InvalidVestingRate: '释放比例须在 5% 至 20% 之间',
+  SlippageTooHigh: '滑点不能超过 10%',
+  SoftCapTooLow: '软顶须不小于加池下限',
+}
+
+function parseContractError(err: unknown): string {
+  if (err instanceof Error || (err && typeof err === 'object')) {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : String((err as { shortMessage?: string }).shortMessage ?? err)
+
+    if (msg.includes('User rejected') || msg.includes('rejected the request')) {
+      return '用户已取消交易'
+    }
+    if (msg.includes('insufficient funds') || msg.includes('exceeds balance')) {
+      return '钱包 BNB 余额不足以支付交易或注资'
+    }
+    if (msg.includes('Ownable: caller is not the owner')) {
+      return '仅所有者可操作'
+    }
+    for (const [name, text] of Object.entries(KNOWN_ERRORS)) {
+      if (msg.includes(name)) return text
+    }
+    return (err as { shortMessage?: string }).shortMessage || msg
+  }
+  return '配置失败，请稍后重试'
+}
 
 interface PresaleFormProps {
   token?: TokenDetail | null
@@ -22,9 +72,13 @@ interface PresaleFormProps {
 }
 
 /**
- * 预售条款表单 — 默认编辑模式，直接调用 updateTokenInfo 接口更新预售信息。
+ * 预售条款表单 — 提交时直接执行 setupPresale（链上配置+注资） + updateTokenInfo（后端存储）
  */
-export function PresaleForm({ token, address }: PresaleFormProps) {
+export function PresaleForm({
+  token,
+  tokenAddress,
+  address,
+}: PresaleFormProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const config = useConfig()
@@ -38,8 +92,10 @@ export function PresaleForm({ token, address }: PresaleFormProps) {
         ? String(token.maxBuyPerWallet)
         : '',
       hardcap: token?.hardcap ? String(token.hardcap) : '',
-      softcap: token?.softcap || token?.soft ? String(token.softcap || token.soft) : '',
-      startTime: token?.startTime ? String(token.startTime) : '0',
+      softcap:
+        token?.softcap || token?.soft
+          ? String(token.softcap || token.soft)
+          : '',
       vestingDelay: token?.vestingDelay ? String(token.vestingDelay) : '7',
       vestingRate: token?.vestingRate ? Number(token.vestingRate) : 10,
       creatorBuyTokens: token?.creatorBuyTokens
@@ -48,10 +104,78 @@ export function PresaleForm({ token, address }: PresaleFormProps) {
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
     },
     onSubmit: async ({ value }) => {
+      // 1. 钱包连接与网络校验
+      if (!address) {
+        toast.error('请先连接钱包')
+        return
+      }
+
+      if (config.state.chainId !== DEFAULT_CHAIN_ID) {
+        try {
+          await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
+        } catch {
+          toast.error(
+            `请在钱包中切换网络至 ${getTargetChainName(DEFAULT_CHAIN_ID)}`,
+          )
+          return
+        }
+      }
+
+      const hardcapWei = parseEther(value.hardcap || '0')
+      const softcapWei = parseEther(value.softcap || '0')
+      const minLiquidityWei = softcapWei // 自动对齐软顶
+      const priceWei = parseEther(value.presaleTokenPrice || '0.001')
+      const maxBuyWei = parseEther(value.maxBuyPerWallet || '1000')
+
+      const rawDelay = Number(value.vestingDelay) || 7
+      const vestingDelaySec =
+        rawDelay > 90 ? BigInt(rawDelay) : BigInt(rawDelay) * 86400n
+
+      const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
+      let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
+
+      // 代币模式自动补齐注资
+      if (creatorBuyTokensWei > 0n && creatorBuyBnbWei <= 0n) {
+        creatorBuyBnbWei =
+          (creatorBuyTokensWei * priceWei) / 1000000000000000000n
+      }
+
       try {
+        const coordinator =
+          getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+
+        // ① 链上调用 coordinator.setupPresale（一次性配置 + 购买注资）
+        const setupHash = await writeContract(config, {
+          address: coordinator,
+          abi: CoordinatorFactoryAbi,
+          functionName: 'setupPresale',
+          chainId: DEFAULT_CHAIN_ID,
+          args: [
+            tokenAddress as `0x${string}`,
+            {
+              presaleTokenPrice: priceWei,
+              maxBuyPerWallet: maxBuyWei,
+              hardcap: hardcapWei,
+              minLiquidityAmount: minLiquidityWei,
+              softCap: softcapWei,
+              startTime: 0n,
+              vestingDelay: vestingDelaySec,
+              vestingRate: BigInt(Number(value.vestingRate || 10)),
+              slippage: 0n,
+              creatorBuyTokens: creatorBuyTokensWei,
+            },
+          ],
+          value: creatorBuyBnbWei > 0n ? creatorBuyBnbWei : undefined,
+        })
+        await waitForTransactionReceipt(config, {
+          hash: setupHash,
+          chainId: DEFAULT_CHAIN_ID,
+        })
+
+        // ② 签名并保存预售信息到后端数据库
         const message = await getSignMessage(address)
         const signature = await signMessage(config, { message })
-        // 直接调用 updateTokenInfo 保存预售信息到后端
+
         await updateTokenInfo({
           id: token?.id ?? '',
           name: token?.name ?? '',
@@ -86,13 +210,11 @@ export function PresaleForm({ token, address }: PresaleFormProps) {
           signature,
         })
 
-        toast.success('预售信息保存成功！')
+        toast.success('预售条款已成功配置上链！前往控制台开启认购')
         queryClient.invalidateQueries({ queryKey: ['creatorTokens', address] })
         navigate('/dashboard')
       } catch (err: unknown) {
-        const msg =
-          err instanceof Error ? err.message : '预售信息保存失败，请稍后重试'
-        toast.error(msg, '保存失败')
+        toast.error(parseContractError(err), '配置失败')
       }
     },
   })
@@ -374,39 +496,6 @@ export function PresaleForm({ token, address }: PresaleFormProps) {
         </form.Subscribe>
       </div>
 
-      {/* 高级参数（默认 startTime / endTime 均为 0，暂不展示） */}
-      {/*
-      <div className="flex flex-col gap-4">
-        <FormSectionTitle title="高级参数" />
-
-        <form.Field
-          name="startTime"
-          validators={{
-            onChange: ({ value }) => {
-              const n = Number(value)
-              if (n > 0 && n < Math.floor(Date.now() / 1000) - 60) {
-                return '认购开始时间不能早于当前时间'
-              }
-              return undefined
-            },
-          }}
-        >
-          {(field) => (
-            <FieldWrap
-              label="认购开始时间"
-              error={field.state.meta.errors[0]}
-            >
-              <StartTimePicker
-                value={field.state.value}
-                onChange={field.handleChange}
-                onBlur={field.handleBlur}
-              />
-            </FieldWrap>
-          )}
-        </form.Field>
-      </div>
-      */}
-
       {/* 创建者代币购买（独立 Section） */}
       <div className="flex flex-col gap-4">
         <form.Subscribe
@@ -442,15 +531,15 @@ export function PresaleForm({ token, address }: PresaleFormProps) {
             <button
               type="submit"
               disabled={!canSubmit}
-              className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/60 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-[transform,opacity] active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
+              className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 border border-white/60 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-[transform,opacity] active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
             >
               {isSubmitting ? (
                 <>
                   <Loader2 className="size-5 animate-spin" />
-                  <span>保存中…</span>
+                  <span>配置并上链中…</span>
                 </>
               ) : (
-                <span>保存预售信息</span>
+                <span>保存并配置预售</span>
               )}
             </button>
           )}
