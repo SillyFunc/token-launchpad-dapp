@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useConnection } from 'wagmi'
 import { type Hex } from 'viem'
 
-import { getTokenByContractAddress } from '@/api/token'
+import { getTokenByContractAddress, getTokenDetailById } from '@/api/token'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 
@@ -14,24 +14,30 @@ import { useTokenGate } from '@/hooks/use-token-gate'
 
 export const Presale = () => {
   const [searchParams] = useSearchParams()
-  const tokenAddress = (searchParams.get('address') || '') as Hex
-  const hasTokenParam = Boolean(tokenAddress)
+  const id = searchParams.get('id')
+  const rawAddress = searchParams.get('address') || ''
+  const tokenAddress = rawAddress as Hex
+  const hasParam = Boolean(id || tokenAddress)
   const { address } = useConnection()
 
-  // 后端代币详情（用于头部展示）
+  // 后端代币详情（根据 id 或合约地址拉取）
   const {
     data: token,
     isLoading: isTokenLoading,
     isError: isTokenError,
   } = useQuery({
-    queryKey: ['tokenDetail', tokenAddress],
-    queryFn: () => getTokenByContractAddress(tokenAddress),
-    enabled: hasTokenParam,
+    queryKey: ['tokenDetail', id || tokenAddress],
+    queryFn: () =>
+      id ? getTokenDetailById(id) : getTokenByContractAddress(tokenAddress),
+    enabled: hasParam,
   })
+
+  const effectiveAddress =
+    tokenAddress || (token?.coinContractAddress as Hex | undefined)
 
   // 统一代币门禁守卫
   const { canSetupPresale } = useTokenGate({
-    tokenAddress,
+    tokenAddress: effectiveAddress,
     token,
   })
 
@@ -52,14 +58,14 @@ export const Presale = () => {
           />
         </button>
         <span className="text-lg font-semibold tracking-wide text-white">
-          配置预售条款
+          配置预售信息
         </span>
       </div>
 
       <Card className="overflow-visible border border-[#484b51] bg-[#131516] ring-0">
         <CardHeader className="border-b border-b-[#484b51]">
           <TokenInfoHeader
-            tokenAddress={tokenAddress}
+            tokenAddress={effectiveAddress || ''}
             token={token}
             isLoading={isTokenLoading}
             isError={isTokenError}
@@ -68,11 +74,16 @@ export const Presale = () => {
 
         <CardContent>
           {canSetupPresale.allowed && address ? (
-            <PresaleForm tokenAddress={tokenAddress} address={address} />
+            <PresaleForm
+              key={token?.id || effectiveAddress || 'presale'}
+              token={token}
+              tokenAddress={effectiveAddress || ''}
+              address={address}
+            />
           ) : (
             <BlockedState
               reason={canSetupPresale.reason ?? ''}
-              isLoading={canSetupPresale.isLoading}
+              isLoading={canSetupPresale.isLoading || isTokenLoading}
               primaryAction={canSetupPresale.primaryAction}
             />
           )}

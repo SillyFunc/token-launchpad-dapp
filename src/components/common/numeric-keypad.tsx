@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import { Delete, X, Check } from 'lucide-react'
 import {
@@ -49,10 +50,15 @@ export function NumericKeypad(props: NumericKeypadProps) {
     allowDecimal = false,
     min,
     max,
-    maxDecimals = 2,
+    maxDecimals = 4,
   } = props
 
   const sheetRef = useRef<HTMLDivElement>(null)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // 1. ahooks useControllableValue: 统一受控与非受控双模式
   const [val, setVal] = useControllableValue<string>(props, {
@@ -151,7 +157,11 @@ export function NumericKeypad(props: NumericKeypadProps) {
     },
   )
 
-  return (
+  if (!mounted || typeof document === 'undefined') {
+    return null
+  }
+
+  const keypadContent = (
     <AnimatePresence>
       {open && (
         <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -172,7 +182,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-            className="relative z-10 w-full rounded-t-2xl border-t border-[#484b51] bg-[#141517] pb-safe shadow-2xl"
+            className="relative z-10 w-full max-w-lg rounded-t-2xl border-t border-[#484b51] bg-[#141517] pb-safe shadow-2xl"
           >
             {/* 拖动条把手 */}
             <div className="flex justify-center pt-2.5 pb-1">
@@ -226,7 +236,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
               )}
             </div>
 
-            {/* 键盘按键网格 */}
+            {/* 键盘按键网格（经典 3 列布局） */}
             <div className="p-3 bg-[#131516]">
               <div className="grid grid-cols-3 gap-2">
                 {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
@@ -271,7 +281,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
                 </button>
               </div>
 
-              {/* 确认完成按钮 */}
+              {/* 确认完成按钮（独立通栏按钮） */}
               <div className="mt-3">
                 <button
                   type="button"
@@ -288,6 +298,8 @@ export function NumericKeypad(props: NumericKeypadProps) {
       )}
     </AnimatePresence>
   )
+
+  return createPortal(keypadContent, document.body)
 }
 
 /**
@@ -307,6 +319,7 @@ export interface NumericInputProps {
   allowDecimal?: boolean
   min?: number
   max?: number
+  maxDecimals?: number
   disabled?: boolean
   className?: string
 }
@@ -316,13 +329,14 @@ export function NumericInput(props: NumericInputProps) {
     id,
     name,
     onBlur,
-    placeholder = '0',
+    placeholder = '',
     title,
     description,
     unit,
     allowDecimal = false,
     min,
     max,
+    maxDecimals,
     disabled = false,
     className,
   } = props
@@ -385,6 +399,7 @@ export function NumericInput(props: NumericInputProps) {
         allowDecimal={allowDecimal}
         min={min}
         max={max}
+        maxDecimals={maxDecimals}
       />
     </>
   )

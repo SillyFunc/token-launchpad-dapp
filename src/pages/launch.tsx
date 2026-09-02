@@ -10,7 +10,7 @@ import { Loader2, ArrowRight } from 'lucide-react'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
 import { TaxSlider } from '@/components/common/tax-slider'
-import { NumericInput } from '@/components/ui/numeric-keypad'
+import { NumericInput } from '@/components/common/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import {

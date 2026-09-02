@@ -21,6 +21,18 @@ export interface SaveTokenData {
   address: string
   message: string
   signature: string
+  presaleTokenPrice?: string | number
+  maxBuyPerWallet?: string | number
+  hardcap?: string | number
+  softcap?: string | number
+  minLiquidityAmount?: string | number
+  startTime?: number | string
+  endTime?: number | string
+  vestingDelay?: number | string
+  vestingRate?: number | string
+  slippage?: number | string
+  creatorBuyTokens?: string | number
+  creatorBuyBnb?: string | number
 }
 
 export interface TokenDetail {
@@ -116,6 +128,7 @@ export interface TokenDetail {
   minLiquidityAmount: any
   slippage: any
   creatorBuyTokens: any
+  creatorBuyBnb?: any
 }
 
 export function uploadTokenLogo(file: File) {

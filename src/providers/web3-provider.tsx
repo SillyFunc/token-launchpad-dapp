@@ -1,4 +1,4 @@
-import { WagmiProvider, createConfig, http, injected, fallback } from 'wagmi'
+import { WagmiProvider, createConfig, http, webSocket, injected, fallback } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConnectKitProvider } from 'connectkit'
 import { walletConnect } from 'wagmi/connectors'
@@ -15,19 +15,32 @@ const config = createConfig({
     }),
   ],
   transports: {
-    [97]: fallback(CHAINS_CONFIG[97].rpcUrls.http.map((url) => http(url))),
-    [56]: fallback(CHAINS_CONFIG[56].rpcUrls.http.map((url) => http(url))),
+    [97]: fallback([
+      ...(CHAINS_CONFIG[97].rpcUrls.webSocket || []).map((url) => webSocket(url)),
+      ...CHAINS_CONFIG[97].rpcUrls.http.map((url) => http(url)),
+    ]),
+    [56]: fallback([
+      ...(CHAINS_CONFIG[56].rpcUrls.webSocket || []).map((url) => webSocket(url)),
+      ...CHAINS_CONFIG[56].rpcUrls.http.map((url) => http(url)),
+    ]),
   },
 })
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: true,
+      staleTime: 30_000,
+    },
+  },
+})
 
 export const Web3Provider = ({ children }: { children: React.ReactNode }) => {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <ConnectKitProvider
-          debugMode
+          debugMode={false}
           theme="midnight"
           options={{
             language: 'zh-CN',

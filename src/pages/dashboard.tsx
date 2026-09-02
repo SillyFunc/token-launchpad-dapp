@@ -9,6 +9,7 @@ import { Coins, RefreshCw, Wallet } from 'lucide-react'
 import { getTokensByCreator, type TokenDetail } from '@/api/token'
 import { Button } from '@/components/ui/button'
 import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
+import { OpenPresaleModal } from '@/components/dashboard/open-presale-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
 import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 import { formatTokenSupply } from '@/lib/format'
@@ -24,6 +25,7 @@ export const Dashboard = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
+  const [openingPresaleToken, setOpeningPresaleToken] = useState<TokenDetail | null>(null)
 
   const {
     data: tokens,
@@ -56,8 +58,13 @@ export const Dashboard = () => {
       : '--'
 
   const handlePresale = (token: TokenDetail) => {
-    const tokenAddr = token.coinContractAddress
-    if (tokenAddr) navigate(`/presale?address=${tokenAddr}`)
+    if (token.id) {
+      navigate(
+        `/presale?id=${token.id}${token.coinContractAddress ? `&address=${token.coinContractAddress}` : ''}`,
+      )
+    } else if (token.coinContractAddress) {
+      navigate(`/presale?address=${token.coinContractAddress}`)
+    }
   }
 
   const handleEdit = (token: TokenDetail) => {
@@ -208,6 +215,7 @@ export const Dashboard = () => {
               totalSupplyText={totalSupplyText}
               onEdit={handleEdit}
               onPresale={handlePresale}
+              onOpenPresale={(t) => setOpeningPresaleToken(t)}
               onLaunch={handleLaunch}
               onClaim={handleClaim}
             />
@@ -231,6 +239,17 @@ export const Dashboard = () => {
                 )
               },
             )
+          }}
+        />
+      )}
+
+      {openingPresaleToken && (
+        <OpenPresaleModal
+          token={openingPresaleToken}
+          onClose={() => setOpeningPresaleToken(null)}
+          onSuccess={() => {
+            void refetch()
+            void queryClient.invalidateQueries()
           }}
         />
       )}

@@ -1,19 +1,20 @@
-import { useConnection, useReadContract } from 'wagmi'
+import { useConnection, useReadContract, useWatchContractEvent } from 'wagmi'
+import { useQueryClient } from '@tanstack/react-query'
 import { isAddress, zeroAddress, type Abi, type Hex } from 'viem'
 
 import type { TokenDetail } from '@/api/token'
+import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import PresaleAbiJson from '@/contracts/abi/Presale.json'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
   getTargetChainName,
 } from '@/config/network'
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
-import PresaleAbiJson from '@/contracts/abi/Presale.json'
 
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 const PresaleAbi = PresaleAbiJson as unknown as Abi
 
-/** docs §4.1 presaleStatus 1-4 状态展示名 */
+/** docs §4.1 presaleStatus 0-4 状态展示名 */
 export const PRESALE_STATUS_LABEL: Record<number, string> = {
   0: '创建/未开启',
   1: '认购中',
@@ -60,29 +61,39 @@ export interface TokenGateResult {
   presaleEnabled: boolean
   presaleOwner?: Hex
 
+  // 预售进度与软顶判定
+  bnbAccumulated: bigint
+  tokensSubscribed: bigint
+  presaleShare: bigint
+  softCap: bigint
+  hardCap: bigint
+  isSoftCapReached: boolean
+  isSoldOut: boolean
+
   // 动作权限守卫
   canEdit: GateAction
   canIssue: GateAction
   canSetupPresale: GateAction
   canClaimAll: GateAction
   canOpenPresale: GateAction
+  canEndPresale: GateAction
+  canLaunch: GateAction
 }
 
 /**
  * 通用代币门禁与权限 Hook
- *
- * 统一收敛：
- * 1. 通用基础门禁（钱包连接、BSC 测试网 97、创建者身份校验）
- * 2. 未发行阶段门禁（草稿编辑 canEdit、发行上链 canIssue）
- * 3. 已发行预售阶段门禁（预售配置 canSetupPresale、一键领取 canClaimAll 等）
  */
 export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
+  const queryClient = useQueryClient()
   const { address: userAddress, chainId } = useConnection()
   const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
   // 解析并规范化代币合约地址
   const rawAddress =
-    options?.tokenAddress || options?.token?.coinContractAddress || ''
+    options?.tokenAddress ||
+    options?.token?.coinContractAddress ||
+    options?.token?.address ||
+    ''
   const validTokenAddress =
     Boolean(rawAddress) && isAddress(String(rawAddress))
       ? (String(rawAddress).toLowerCase() as Hex)
@@ -123,7 +134,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     functionName: 'tokenConfigured',
     args: [queryTokenAddress],
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: isIssued, staleTime: 30_000 },
+    query: { enabled: isIssued, staleTime: 10_000 },
   })
 
   // 3. 链上创建者地址
@@ -140,7 +151,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     query: { enabled: isIssued, staleTime: 30_000 },
   })
 
-  // 4. 代币对应的托管仓地址
+  // 4. 代币对应的托管仓地址 (支持后端传参或链上查得)
   const {
     data: presaleAddressData,
     isLoading: isPresaleAddrLoading,
@@ -154,10 +165,16 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     query: { enabled: isIssued, staleTime: 30_000 },
   })
 
+  const rawPresaleAddr =
+    options?.token?.presaleAddress ||
+    (presaleAddressData as string | undefined) ||
+    ''
+
   const presaleAddress =
-    Boolean(presaleAddressData) &&
-    String(presaleAddressData).toLowerCase() !== zeroAddress
-      ? (String(presaleAddressData).toLowerCase() as Hex)
+    Boolean(rawPresaleAddr) &&
+    isAddress(String(rawPresaleAddr)) &&
+    String(rawPresaleAddr).toLowerCase() !== zeroAddress
+      ? (String(rawPresaleAddr).toLowerCase() as Hex)
       : undefined
 
   const queryPresaleAddress = presaleAddress ?? zeroAddress
@@ -165,20 +182,36 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     presaleAddress && presaleAddress !== zeroAddress,
   )
 
-  // 5. 托管仓整体发射状态
+  // 5. 托管仓整体发射状态 [enabled, status, bnbAccumulated, tokensSubscribed, lpAdded, tokensClaimed]
   const {
     data: launchStatusData,
     isLoading: isStatusLoading,
     isError: isStatusError,
+    refetch: refetchLaunchStatus,
   } = useReadContract({
     address: queryPresaleAddress,
     abi: PresaleAbi,
     functionName: 'getLaunchStatus',
     chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasPresaleContract, staleTime: 15_000 },
+    query: {
+      enabled: hasPresaleContract,
+      staleTime: 30_000,
+    },
   })
 
-  // 6. 托管仓所有者
+  // 6. 直接读取托管仓 presaleStatus() 进行强双重兜底
+  const { data: directPresaleStatusData } = useReadContract({
+    address: queryPresaleAddress,
+    abi: PresaleAbi,
+    functionName: 'presaleStatus',
+    chainId: DEFAULT_CHAIN_ID,
+    query: {
+      enabled: hasPresaleContract,
+      staleTime: 30_000,
+    },
+  })
+
+  // 7. 托管仓所有者
   const {
     data: presaleOwnerData,
     isLoading: isOwnerLoading,
@@ -191,6 +224,46 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     query: { enabled: hasPresaleContract, staleTime: 30_000 },
   })
 
+  // 8. 预售软顶 (softCap)
+  const { data: softCapData, isLoading: isSoftCapLoading } = useReadContract({
+    address: queryPresaleAddress,
+    abi: PresaleAbi,
+    functionName: 'softCap',
+    chainId: DEFAULT_CHAIN_ID,
+    query: { enabled: hasPresaleContract, staleTime: 30_000 },
+  })
+
+  // 9. 预售硬顶 (hardcap)
+  const { data: hardCapData, isLoading: isHardCapLoading } = useReadContract({
+    address: queryPresaleAddress,
+    abi: PresaleAbi,
+    functionName: 'hardcap',
+    chainId: DEFAULT_CHAIN_ID,
+    query: { enabled: hasPresaleContract, staleTime: 30_000 },
+  })
+
+  // 10. 预售总份额 (presaleShare)
+  const { data: presaleShareData } = useReadContract({
+    address: queryPresaleAddress,
+    abi: PresaleAbi,
+    functionName: 'presaleShare',
+    chainId: DEFAULT_CHAIN_ID,
+    query: { enabled: hasPresaleContract, staleTime: 60_000 },
+  })
+
+  // ================= 链上事件实时监听（即时刷新 UI） =================
+
+  useWatchContractEvent({
+    address: presaleAddress,
+    abi: PresaleAbi,
+    chainId: DEFAULT_CHAIN_ID,
+    enabled: hasPresaleContract,
+    onLogs: () => {
+      void queryClient.invalidateQueries()
+      void refetchLaunchStatus()
+    },
+  })
+
   // ================= 状态解析与聚合 =================
 
   const isChainLoading = isIssued
@@ -198,7 +271,11 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       isConfiguredLoading ||
       isCreatorLoading ||
       isPresaleAddrLoading ||
-      (hasPresaleContract && (isStatusLoading || isOwnerLoading))
+      (hasPresaleContract &&
+        (isStatusLoading ||
+          isOwnerLoading ||
+          isSoftCapLoading ||
+          isHardCapLoading))
     : false
 
   const isChainError = isIssued
@@ -212,20 +289,65 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const tokenExists = Boolean(tokenExistsData)
   const presaleConfigured = Boolean(isConfiguredData)
 
-  const launchStatus = launchStatusData as
-    | readonly [boolean, bigint, bigint, bigint, boolean, boolean]
-    | undefined
-  const presaleEnabled = Boolean(launchStatus?.[0])
+  // 兼容器件返回值：支持命名对象属性和数字数组索引两种解构
+  const rawStatus =
+    directPresaleStatusData !== undefined
+      ? directPresaleStatusData
+      : (launchStatusData as any)?.status !== undefined
+        ? (launchStatusData as any).status
+        : Array.isArray(launchStatusData)
+          ? launchStatusData[1]
+          : undefined
+
   const presaleStatus =
-    launchStatus?.[1] !== undefined ? Number(launchStatus[1]) : undefined
-  const tokensClaimed = Boolean(launchStatus?.[5])
+    rawStatus !== undefined ? Number(rawStatus) : undefined
+
+  const rawBnb =
+    (launchStatusData as any)?.bnbAccumulated !== undefined
+      ? (launchStatusData as any).bnbAccumulated
+      : Array.isArray(launchStatusData)
+        ? launchStatusData[2]
+        : 0n
+  const bnbAccumulated = (rawBnb as bigint) ?? 0n
+
+  const rawSubscribed =
+    (launchStatusData as any)?.tokensSubscribed !== undefined
+      ? (launchStatusData as any).tokensSubscribed
+      : Array.isArray(launchStatusData)
+        ? launchStatusData[3]
+        : 0n
+  const tokensSubscribed = (rawSubscribed as bigint) ?? 0n
+
+  const rawClaimed =
+    (launchStatusData as any)?.tokensClaimed_ !== undefined
+      ? (launchStatusData as any).tokensClaimed_
+      : (launchStatusData as any)?.tokensClaimed !== undefined
+        ? (launchStatusData as any).tokensClaimed
+        : Array.isArray(launchStatusData)
+          ? launchStatusData[5]
+          : false
+  const tokensClaimed = Boolean(rawClaimed)
+
+  const presaleEnabled =
+    (launchStatusData as any)?.enabled !== undefined
+      ? Boolean((launchStatusData as any).enabled)
+      : Array.isArray(launchStatusData)
+        ? Boolean(launchStatusData[0])
+        : presaleStatus !== undefined && presaleStatus >= 1
+
+  const softCap = (softCapData as bigint | undefined) ?? 0n
+  const hardCap = (hardCapData as bigint | undefined) ?? 0n
+  const presaleShare = (presaleShareData as bigint | undefined) ?? 0n
+
+  const isSoftCapReached = softCap > 0n && bnbAccumulated >= softCap
+  const isSoldOut = presaleShare > 0n && tokensSubscribed >= presaleShare
 
   const presaleOwner =
     presaleOwnerData && String(presaleOwnerData).toLowerCase() !== zeroAddress
       ? (String(presaleOwnerData).toLowerCase() as Hex)
       : undefined
 
-  // 创建者身份校验（多源兼容：链上 tokenCreators、presaleOwner、传入 token.creatorAddress、options.creatorAddress）
+  // 创建者身份校验
   const expectedCreator =
     (onchainCreatorData as string | undefined) ||
     presaleOwner ||
@@ -398,6 +520,31 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     return { allowed: presaleStatus === 0 }
   })()
 
+  // 6. 结束预售 (canEndPresale): 状态处于 1 (认购中) + 必须达到软顶 + 是创建者
+  const canEndPresale: GateAction = (() => {
+    if (!hasWallet || !isOnTestnet || !isCreator || !hasPresaleContract) {
+      return { allowed: false }
+    }
+    if (presaleStatus !== 1) {
+      return { allowed: false, reason: '当前预售状态非认购中，不可结束预售' }
+    }
+    if (!isSoftCapReached) {
+      return {
+        allowed: false,
+        reason: '募集资金尚未达到预售软顶，暂不可结束预售',
+      }
+    }
+    return { allowed: true }
+  })()
+
+  // 7. 一键开盘加池 (canLaunch): 状态处于 2 (认购结束) + 是创建者
+  const canLaunch: GateAction = (() => {
+    if (!hasWallet || !isOnTestnet || !isCreator || !hasPresaleContract) {
+      return { allowed: false }
+    }
+    return { allowed: presaleStatus === 2 }
+  })()
+
   return {
     hasWallet,
     isOnTestnet,
@@ -414,10 +561,19 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     tokensClaimed,
     presaleEnabled,
     presaleOwner,
+    bnbAccumulated,
+    tokensSubscribed,
+    presaleShare,
+    softCap,
+    hardCap,
+    isSoftCapReached,
+    isSoldOut,
     canEdit,
     canIssue,
     canSetupPresale,
     canClaimAll,
     canOpenPresale,
+    canEndPresale,
+    canLaunch,
   }
 }
