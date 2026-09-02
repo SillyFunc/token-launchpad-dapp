@@ -34,11 +34,9 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { formatAddress } from '@/lib/format'
 import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
-import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
 import PresaleAbiJson from '@/contracts/abi/Presale.json'
 import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
 
-const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
 const PresaleAbi = PresaleAbiJson as unknown as Abi
 const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 

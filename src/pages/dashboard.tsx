@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection, useReadContract } from 'wagmi'
 import { type Abi } from 'viem'
 import { ConnectKitButton } from 'connectkit'
-import { Coins, Rocket, RefreshCw, Wallet } from 'lucide-react'
+import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
 import { getTokensByCreator, type TokenDetail } from '@/api/token'
 import { Button } from '@/components/ui/button'
@@ -57,8 +57,8 @@ export const Dashboard = () => {
       : '--'
 
   const handlePresale = (token: TokenDetail) => {
-    // const tokenAddr = token.coinContractAddress || ''
-    // navigate(`/presale?address=${tokenAddr}`)
+    const tokenAddr = token.coinContractAddress
+    if (tokenAddr) navigate(`/presale?address=${tokenAddr}`)
   }
 
   const handleLaunch = (token: TokenDetail) => {

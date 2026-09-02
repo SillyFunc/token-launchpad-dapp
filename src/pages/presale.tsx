@@ -1,57 +1,248 @@
 import { useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { useForm } from '@tanstack/react-form'
-import { useConnection } from 'wagmi'
-import { Loader2, Coins } from 'lucide-react'
+import { useConnection, useReadContract } from 'wagmi'
+import { type Abi, zeroAddress } from 'viem'
 
-import { FormSectionTitle } from '@/components/common/form-section-title'
-import { TaxSlider } from '@/components/common/tax-slider'
-import { NumericInput } from '@/components/ui/numeric-keypad'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@/components/ui/card'
-import { formatAddress } from '@/lib/format'
 import { getTokenByContractAddress } from '@/api/token'
+import { CONTRACT_ADDRESSES } from '@/contracts/addresses'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import PresaleAbiJson from '@/contracts/abi/Presale.json'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
+
+import { TokenInfoHeader } from '@/components/presale/token-info-header'
+import { BlockedState } from '@/components/presale/blocked-state'
+import { PresaleForm } from '@/components/presale/presale-form'
+
+const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
+const PresaleAbi = PresaleAbiJson as unknown as Abi
+
+/** docs §4.1 presaleStatus 1-4 的中文标签 */
+const PRESALE_STATUS_LABEL: Record<string, string> = {
+  '1': '认购中',
+  '2': '认购结束（待开盘）',
+  '3': '已开盘',
+  '4': '发行失败',
+}
+
+interface GateResult {
+  ok: boolean
+  reason?: string
+  primaryAction?: { label: string; to: string }
+  isLoading: boolean
+}
+
+/**
+ * 前置条件校验 — 严格遵循 docs §2.2（须先 createToken）+ §2.1（已 claim 的代币
+ * 托管仓无余额，无法预售）+ §4.1（仅 status=0 可 setupPresale）+ §7.9（一次性）。
+ * 任一不满足返回阻塞态。
+ */
+function evaluateGate(input: {
+  hasTokenParam: boolean
+  hasAddress: boolean
+  isOnTestnet: boolean
+  tokenExists?: boolean
+  isConfigured?: boolean
+  isCreator?: boolean
+  tokensClaimed?: boolean
+  presaleStatus?: bigint
+  isStatusError?: boolean
+  isChainLoading: boolean
+}): GateResult {
+  const {
+    hasTokenParam,
+    hasAddress,
+    isOnTestnet,
+    tokenExists,
+    isConfigured,
+    isCreator,
+    tokensClaimed,
+    presaleStatus,
+    isStatusError,
+    isChainLoading,
+  } = input
+
+  if (!hasTokenParam)
+    return {
+      ok: false,
+      reason: '未在 URL 中指定代币合约地址（?address=0x…），请从发行页面跳转进入。',
+      primaryAction: { label: '前往发行代币', to: '/launch' },
+      isLoading: false,
+    }
+
+  if (!hasAddress)
+    return { ok: false, reason: '请先连接钱包后再配置预售条款。', isLoading: false }
+
+  if (!isOnTestnet)
+    return {
+      ok: false,
+      reason: '当前钱包未连接到 BSC 测试网（ChainId 97），请在钱包中切换网络。',
+      isLoading: false,
+    }
+
+  // 链上查询尚未返回时不阻断，交由 BlockedState 渲染 loading 占位
+  if (isChainLoading) return { ok: false, isLoading: true }
+
+  if (tokenExists === false)
+    return {
+      ok: false,
+      reason: '该代币不存在于本平台（coordinator 未登记），无法配置预售。',
+      primaryAction: { label: '前往首页', to: '/board' },
+      isLoading: false,
+    }
+
+  if (isConfigured)
+    return {
+      ok: false,
+      reason: '预售条款已经配置，setupPresale 是一次性操作，不可重复修改。如需调整请前往控制台。',
+      primaryAction: { label: '前往控制台', to: '/dashboard' },
+      isLoading: false,
+    }
+
+  if (isCreator === false)
+    return {
+      ok: false,
+      reason: '当前连接的钱包不是该代币的创建者，仅创建者可配置预售条款。',
+      primaryAction: { label: '前往控制台', to: '/dashboard' },
+      isLoading: false,
+    }
+
+  // docs §2.1：claimAllTokens 是出口动作，领取后托管仓无代币，预售不可行（NoSupply）
+  if (tokensClaimed)
+    return {
+      ok: false,
+      reason: '该代币已通过「一键领取」完成发放（领取即上线），托管仓已无代币，无法再开启预售。',
+      primaryAction: { label: '前往控制台', to: '/dashboard' },
+      isLoading: false,
+    }
+
+  if (isStatusError)
+    return {
+      ok: false,
+      reason: '预售合约状态读取失败，请稍后重试。',
+      isLoading: false,
+    }
+
+  if (presaleStatus !== undefined && presaleStatus !== 0n) {
+    const text = PRESALE_STATUS_LABEL[String(presaleStatus)] ?? `status=${presaleStatus}`
+    return {
+      ok: false,
+      reason: `当前预售状态为「${text}」，已超过可配置窗口。请前往控制台管理。`,
+      primaryAction: { label: '前往控制台', to: '/dashboard' },
+      isLoading: false,
+    }
+  }
+
+  return { ok: true, isLoading: false }
+}
 
 export const Presale = () => {
   const [searchParams] = useSearchParams()
-  const tokenAddress = searchParams.get('address') || ''
-  const { address } = useConnection()
+  const tokenAddress = (searchParams.get('address') || '') as `0x${string}`
+  const hasTokenParam = tokenAddress !== ('' as `0x${string}`)
+  const { address, chainId } = useConnection()
+  const coordinator = CONTRACT_ADDRESSES[97].coordinatorFactory
 
-  const {
-    data: token,
-    isLoading: isTokenLoading,
-    isError: isTokenError,
-  } = useQuery({
-    queryKey: ['tokenDetail', tokenAddress],
-    queryFn: () => getTokenByContractAddress(tokenAddress),
-    enabled: Boolean(tokenAddress),
+  // 后端代币详情（用于头部展示）
+  const { data: token, isLoading: isTokenLoading, isError: isTokenError } =
+    useQuery({
+      queryKey: ['tokenDetail', tokenAddress],
+      queryFn: () => getTokenByContractAddress(tokenAddress),
+      enabled: hasTokenParam,
+    })
+
+  // 链上：代币是否登记于本平台
+  const { data: tokenExistsData, isLoading: isExistsLoading } = useReadContract({
+    address: coordinator,
+    abi: CoordinatorFactoryAbi,
+    functionName: 'tokenExists',
+    args: [tokenAddress],
+    chainId: 97,
+    query: { enabled: hasTokenParam, staleTime: 30_000 },
   })
 
-  const form = useForm({
-    defaultValues: {
-      hardcap: '',
-      softcap: '',
-      vestingDelay: '7',
-      vestingRate: 10,
-    },
-    onSubmit: async () => {},
+  // 链上：是否已配置预售（一次性，docs §7.9）
+  const { data: isConfiguredData, isLoading: isConfiguredLoading } =
+    useReadContract({
+      address: coordinator,
+      abi: CoordinatorFactoryAbi,
+      functionName: 'tokenConfigured',
+      args: [tokenAddress],
+      chainId: 97,
+      query: { enabled: hasTokenParam, staleTime: 30_000 },
+    })
+
+  // 链上：当前钱包是否为创建者
+  const { data: creatorAddress, isLoading: isCreatorLoading } = useReadContract({
+    address: coordinator,
+    abi: CoordinatorFactoryAbi,
+    functionName: 'tokenCreators',
+    args: [tokenAddress],
+    chainId: 97,
+    query: { enabled: hasTokenParam, staleTime: 30_000 },
+  })
+
+  // 链上：托管仓地址 → 一次拉齐 status + tokensClaimed（docs §4.1 / token-card 同款判定）
+  const { data: presaleAddress, isLoading: isPresaleAddrLoading } =
+    useReadContract({
+      address: coordinator,
+      abi: CoordinatorFactoryAbi,
+      functionName: 'tokenPresales',
+      args: [tokenAddress],
+      chainId: 97,
+      query: { enabled: hasTokenParam, staleTime: 30_000 },
+    })
+  const hasPresaleContract =
+    Boolean(presaleAddress) &&
+    (presaleAddress as string)?.toLowerCase() !== zeroAddress
+
+  const {
+    data: launchStatus,
+    isLoading: isStatusLoading,
+    isError: isStatusError,
+  } = useReadContract({
+    address: hasPresaleContract ? (presaleAddress as `0x${string}`) : undefined,
+    abi: PresaleAbi,
+    functionName: 'getLaunchStatus',
+    chainId: 97,
+    query: { enabled: hasPresaleContract, staleTime: 15_000 },
+  })
+  // [enabled, status, bnbAccumulated, tokensSubscribed, lpAdded, tokensClaimed]
+  const launchStatusData = launchStatus as
+    | readonly [boolean, bigint, bigint, bigint, boolean, boolean]
+    | undefined
+  const presaleStatus = launchStatusData?.[1]
+  const tokensClaimed = Boolean(launchStatusData?.[5])
+
+  const isChainLoading =
+    isExistsLoading ||
+    isConfiguredLoading ||
+    isCreatorLoading ||
+    isPresaleAddrLoading ||
+    isStatusLoading
+
+  const isOnTestnet = chainId === 97
+  const isCreator =
+    Boolean(address) &&
+    Boolean(creatorAddress) &&
+    creatorAddress !== zeroAddress &&
+    (creatorAddress as string)?.toLowerCase() === address?.toLowerCase()
+
+  const gate = evaluateGate({
+    hasTokenParam,
+    hasAddress: Boolean(address),
+    isOnTestnet,
+    tokenExists: Boolean(tokenExistsData),
+    isConfigured: Boolean(isConfiguredData),
+    isCreator,
+    tokensClaimed,
+    presaleStatus,
+    isStatusError,
+    isChainLoading,
   })
 
   return (
-    <form
-      className="relative mx-auto flex w-full flex-col pb-28 pt-6"
-      onSubmit={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        void form.handleSubmit()
-      }}
-    >
+    <div className="relative mx-auto flex w-full flex-col pb-28 pt-6">
       <div className="mb-4 flex shrink-0 items-center gap-3">
         <button
           type="button"
@@ -67,289 +258,32 @@ export const Presale = () => {
           />
         </button>
         <span className="text-lg font-semibold tracking-wide text-white">
-          创建代币
+          配置预售条款
         </span>
       </div>
 
       <Card className="overflow-visible border border-[#484b51] bg-[#131516] ring-0">
         <CardHeader className="border-b border-b-[#484b51]">
-          {isTokenLoading ? (
-            <div className="flex items-center gap-3">
-              <div className="size-10 animate-pulse rounded bg-[#2F3737]" />
-              <div className="flex flex-col gap-1.5">
-                <div className="h-3.5 w-24 animate-pulse rounded bg-[#2F3737]" />
-                <div className="h-3 w-32 animate-pulse rounded bg-[#2F3737]" />
-              </div>
-            </div>
-          ) : token ? (
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-[#484b51] bg-[#1a1c1e]">
-                {token.coinImg ? (
-                  <img
-                    src={token.coinImg}
-                    alt={token.name}
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  <Coins className="size-5 text-[#FFA546]" />
-                )}
-              </div>
-              <div className="flex min-w-0 flex-col">
-                <div className="flex items-center gap-2">
-                  <CardTitle className="truncate text-sm font-bold text-white">
-                    {token.name}
-                  </CardTitle>
-                  {token.symbol && (
-                    <span className="shrink-0 rounded bg-[#FE810B]/15 px-1.5 py-0.5 text-xs font-semibold text-[#FFA546]">
-                      {token.symbol}
-                    </span>
-                  )}
-                </div>
-                <CardDescription className="font-mono text-xs text-neutral-400">
-                  CA: {formatAddress(tokenAddress)}
-                </CardDescription>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-bold text-white">
-                代币信息
-              </CardTitle>
-              <CardDescription className="text-xs text-neutral-400">
-                {isTokenError ? '获取代币信息失败' : '未指定代币合约地址'}
-              </CardDescription>
-            </div>
-          )}
+          <TokenInfoHeader
+            tokenAddress={tokenAddress}
+            token={token}
+            isLoading={isTokenLoading}
+            isError={isTokenError}
+          />
         </CardHeader>
 
-        <CardContent className="flex flex-col space-y-10 p-4">
-          <div className="flex flex-col gap-6">
-            <FormSectionTitle title="基本信息" />
-
-            <div className="flex flex-col gap-4">
-              <form.Field
-                name="hardcap"
-                validators={{
-                  onChange: ({ value }) => {
-                    const n = Number(value)
-                    if (!value || Number.isNaN(n) || n <= 0) {
-                      return '请输入大于 0 的硬顶金额'
-                    }
-                    return undefined
-                  },
-                }}
-              >
-                {(field) => {
-                  const errorMsg = field.state.meta.errors[0]
-                  return (
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-0.5">
-                        <label
-                          htmlFor={field.name}
-                          className="text-sm text-white"
-                        >
-                          硬顶 (Hard Cap)
-                        </label>
-                        <span className="text-xs text-[#f7594b]">*</span>
-                      </div>
-                      <div className="mt-1.5">
-                        <NumericInput
-                          id={field.name}
-                          name={field.name}
-                          value={field.state.value}
-                          onChange={field.handleChange}
-                          onBlur={field.handleBlur}
-                          title="设置募资硬顶 (BNB)"
-                          description="募集达到硬顶后认购提前结束"
-                          unit="BNB"
-                          allowDecimal
-                          maxDecimals={4}
-                        />
-                      </div>
-                      {errorMsg && (
-                        <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
-                      )}
-                    </div>
-                  )
-                }}
-              </form.Field>
-
-              <form.Field
-                name="softcap"
-                validators={{
-                  onChangeListenTo: ['hardcap'],
-                  onChange: ({ value, fieldApi }) => {
-                    const n = Number(value)
-                    if (!value || Number.isNaN(n) || n <= 0) {
-                      return '请输入大于 0 的软顶金额'
-                    }
-                    const hardcap = Number(
-                      fieldApi.form.getFieldValue('hardcap'),
-                    )
-                    if (Number.isFinite(hardcap) && hardcap > 0) {
-                      if (n !== hardcap / 2) {
-                        return 'Soft Cap 必须是 Hard Cap 的一半'
-                      }
-                    }
-                    return undefined
-                  },
-                }}
-              >
-                {(field) => {
-                  const errorMsg = field.state.meta.errors[0]
-                  return (
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-0.5">
-                        <label
-                          htmlFor={field.name}
-                          className="text-sm text-white"
-                        >
-                          软顶 (Soft Cap)
-                        </label>
-                        <span className="text-xs text-[#f7594b]">*</span>
-                      </div>
-                      <div className="mt-1.5">
-                        <NumericInput
-                          id={field.name}
-                          name={field.name}
-                          value={field.state.value}
-                          onChange={field.handleChange}
-                          onBlur={field.handleBlur}
-                          title="设置预售成功软顶 (BNB)"
-                          description="认购期结束时未达此金额则预售失败并全额退款"
-                          unit="BNB"
-                          allowDecimal
-                          maxDecimals={4}
-                        />
-                      </div>
-                      {errorMsg && (
-                        <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
-                      )}
-                    </div>
-                  )
-                }}
-              </form.Field>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6">
-            <FormSectionTitle title="锁仓释放" />
-
-            <div className="flex flex-col gap-4">
-              <form.Field
-                name="vestingDelay"
-                validators={{
-                  onChange: ({ value }) => {
-                    const n = Number(value)
-                    if (!value || !Number.isInteger(n) || n < 7 || n > 90) {
-                      return '释放周期须在 7 至 90 天之间'
-                    }
-                    return undefined
-                  },
-                }}
-              >
-                {(field) => {
-                  const errorMsg = field.state.meta.errors[0]
-                  return (
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-0.5">
-                        <label
-                          htmlFor={field.name}
-                          className="text-sm text-white"
-                        >
-                          Vesting delay (7-90)
-                        </label>
-                        <span className="text-xs text-[#f7594b]">*</span>
-                      </div>
-                      <div className="mt-1.5">
-                        <NumericInput
-                          id={field.name}
-                          name={field.name}
-                          value={field.state.value}
-                          onChange={field.handleChange}
-                          onBlur={field.handleBlur}
-                          title="设置释放周期 (7-90 天)"
-                          description="开盘后每过一个周期解锁一期代币份额"
-                          unit="天"
-                          min={7}
-                          max={90}
-                        />
-                      </div>
-                      {errorMsg && (
-                        <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
-                      )}
-                    </div>
-                  )
-                }}
-              </form.Field>
-
-              <form.Field
-                name="vestingRate"
-                validators={{
-                  onChange: ({ value }) => {
-                    if (value < 5 || value > 20) {
-                      return '释放比例须在 5% 至 20% 之间'
-                    }
-                    return undefined
-                  },
-                }}
-              >
-                {(field) => {
-                  const errorMsg = field.state.meta.errors[0]
-                  return (
-                    <div className="flex flex-col">
-                      <TaxSlider
-                        label="Vesting rate (5%-20%)"
-                        required
-                        min={5}
-                        max={20}
-                        step={1}
-                        value={field.state.value}
-                        onChange={field.handleChange}
-                      />
-                      {errorMsg && (
-                        <p className="mt-1 text-xs text-red-500">{errorMsg}</p>
-                      )}
-                    </div>
-                  )
-                }}
-              </form.Field>
-            </div>
-          </div>
+        <CardContent>
+          {gate.ok && address ? (
+            <PresaleForm tokenAddress={tokenAddress} address={address} />
+          ) : (
+            <BlockedState
+              reason={gate.reason ?? ''}
+              isLoading={gate.isLoading}
+              primaryAction={gate.primaryAction}
+            />
+          )}
         </CardContent>
       </Card>
-
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-t-white/10 bg-[#131516] p-4">
-        <form.Subscribe
-          selector={(state) => ({
-            canSubmit: state.isValid && !state.isSubmitting && Boolean(address),
-            isSubmitting: state.isSubmitting,
-          })}
-        >
-          {({ canSubmit, isSubmitting }) => (
-            <>
-              {!address && (
-                <p className="mb-2 text-xs text-neutral-400">请先连接钱包</p>
-              )}
-
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/60 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-[transform,opacity] active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="size-5 animate-spin" />
-                    <span>提交中…</span>
-                  </>
-                ) : (
-                  <span>创建代币</span>
-                )}
-              </button>
-            </>
-          )}
-        </form.Subscribe>
-      </div>
-    </form>
+    </div>
   )
 }
