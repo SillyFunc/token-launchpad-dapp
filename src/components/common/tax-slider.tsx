@@ -54,7 +54,7 @@ export function TaxSlider({
           <span>{min}%</span>
           <span>{max}%</span>
         </div>
-        <div className="relative flex items-center rounded py-1 focus-within:ring-1 focus-within:ring-[#FE810B]">
+        <div className="relative flex items-center rounded py-1">
           <div className="h-1 w-full rounded-full bg-[#2F3737]" aria-hidden="true">
             <div
               className="h-1 rounded-full bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B]"
@@ -71,7 +71,7 @@ export function TaxSlider({
             required={required}
             aria-label={label}
             onChange={(event) => onChange(Number(event.currentTarget.value))}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0 focus:outline-none focus-visible:outline-none focus:ring-0"
           />
           <div
             className="pointer-events-none absolute h-3.5 w-2 -translate-x-1/2 rounded-xs bg-[#FB5F16]"
