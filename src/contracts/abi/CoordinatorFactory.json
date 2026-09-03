@@ -1326,5 +1326,10 @@
     "type": "error",
     "name": "ZeroCreationFee",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroMinLiquidity",
+    "inputs": []
   }
 ]
