@@ -218,11 +218,41 @@ export function TokenDetailPage() {
         })
       : '0'
 
-  // 快捷百分比填入
+  // 单钱包限额换算与剩余额度（考虑累计认购与硬顶剩余）
+  const userPurchasedTokens = Number(formatEther(userShare))
+  const remainingTokensQuota =
+    maxBuyNum > 0 ? Math.max(0, maxBuyNum - userPurchasedTokens) : 0
+  const remainingMaxBnbQuota =
+    maxBuyNum > 0 && presalePriceNum > 0
+      ? Number((remainingTokensQuota * presalePriceNum).toFixed(4))
+      : null
+
+  // 剩余未募集硬顶（BNB）
+  const remainingHardcapBnb =
+    hardCapNum > 0 ? Math.max(0, hardCapNum - bnbAccumulatedNum) : null
+
+  // 综合可用出资上限（钱包可用、单钱包限额剩余、硬顶剩余三者取小）
+  const usableWalletBnb = Math.max(0, userBnbBalance - 0.005)
+  const ceilingCandidateList = [
+    usableWalletBnb,
+    remainingMaxBnbQuota,
+    remainingHardcapBnb,
+  ].filter((v): v is number => v !== null)
+  const effectiveMaxBnb =
+    ceilingCandidateList.length > 0
+      ? Math.min(...ceilingCandidateList)
+      : usableWalletBnb
+
+  // 实时超限状态
+  const isOverWalletLimit =
+    inputBnbNum > 0 &&
+    remainingMaxBnbQuota !== null &&
+    inputBnbNum > remainingMaxBnbQuota + 0.0001
+
+  // 快捷百分比填入（基于综合可用上限，去除末尾冗余的 0）
   const handlePercentClick = (percent: number) => {
-    const usableBnb = Math.max(0, userBnbBalance - 0.005)
-    const target = (usableBnb * percent) / 100
-    setSubscribeAmount(target > 0 ? target.toFixed(4) : '')
+    const target = (effectiveMaxBnb * percent) / 100
+    setSubscribeAmount(target > 0 ? String(parseFloat(target.toFixed(4))) : '')
   }
 
   // ⑦ 散户参与预售认购
@@ -247,12 +277,18 @@ export function TokenDetailPage() {
       return
     }
 
-    // 校验单钱包限额
-    const maxBuyLimit = Number(token?.maxBuyPerWallet || 0)
-    if (maxBuyLimit > 0 && presalePriceNum > 0) {
+    // 校验单钱包限额（累计认购校验，避免分次购买突破限额导致合约 revert）
+    if (maxBuyNum > 0 && presalePriceNum > 0) {
       const targetTokens = inputBnbNum / presalePriceNum
-      if (targetTokens > maxBuyLimit) {
-        toast.error(`超出单钱包最大认购限额 (${maxBuyLimit} 枚代币)`)
+      const totalTokensAfter = userPurchasedTokens + targetTokens
+      if (totalTokensAfter > maxBuyNum + 0.0001) {
+        if (remainingTokensQuota <= 0) {
+          toast.error('您已达到单钱包认购上限，无法继续认购')
+        } else {
+          toast.error(
+            `超出单钱包认购上限，您最多还可认购 ${remainingMaxBnbQuota} BNB`,
+          )
+        }
         return
       }
     }
@@ -678,16 +714,31 @@ export function TokenDetailPage() {
               <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-white">参与预售</span>
-                  <span className="text-neutral-400">
-                    钱包余额：
-                    <strong className="font-mono text-white">
-                      {userBnbBalance.toFixed(4)} BNB
-                    </strong>
-                  </span>
+                  <div className="flex items-center gap-2.5 text-neutral-400">
+                    {remainingMaxBnbQuota !== null && (
+                      <span>
+                        单钱包限购剩余：
+                        <strong className="font-mono text-[#FFA546]">
+                          {remainingMaxBnbQuota} BNB
+                        </strong>
+                      </span>
+                    )}
+                    <span>
+                      钱包余额：
+                      <strong className="font-mono text-white">
+                        {userBnbBalance.toFixed(4)} BNB
+                      </strong>
+                    </span>
+                  </div>
                 </div>
 
-                {/* 输入框 + MAX 按钮 */}
-                <div className="flex h-11 items-center justify-between border border-[#484b51] bg-[#181a1d] px-3 focus-within:border-[#FE810B]">
+                {/* 输入框 */}
+                <div
+                  className={cn(
+                    'flex h-11 items-center justify-between border border-[#484b51] bg-[#181a1d] px-3 focus-within:border-[#FE810B] transition-colors',
+                    isOverWalletLimit && 'border-red-500',
+                  )}
+                >
                   <input
                     type="text"
                     inputMode="decimal"
@@ -701,14 +752,15 @@ export function TokenDetailPage() {
                     }}
                     className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-600 focus:outline-none"
                   />
-                  <button
-                    type="button"
-                    onClick={() => handlePercentClick(100)}
-                    className="ml-2 cursor-pointer font-mono text-xs font-bold text-[#FFA546] hover:underline"
-                  >
-                    MAX
-                  </button>
+                  <span className="ml-2 font-mono text-xs font-bold text-[#FFA546] select-none">
+                    BNB
+                  </span>
                 </div>
+                {isOverWalletLimit && (
+                  <span className="text-[11px] text-red-500">
+                    超出单钱包限额！您当前最多还可认购 {remainingMaxBnbQuota} BNB
+                  </span>
+                )}
 
                 {/* 快捷百分比 (25% / 50% / 75% / 100%) */}
                 <div className="grid grid-cols-4 gap-2 pt-1">
@@ -744,7 +796,7 @@ export function TokenDetailPage() {
                 onAction={handleSubscribe}
                 loading={isSubscribing}
                 loadingText="认购处理中…"
-                disabled={presaleStatus !== 1}
+                disabled={presaleStatus !== 1 || isOverWalletLimit}
                 className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
               >
                 <span>
