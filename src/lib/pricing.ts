@@ -4,6 +4,7 @@ import {
   webSocket,
   parseAbi,
   formatUnits,
+  zeroAddress,
   type Address,
   type PublicClient,
 } from 'viem'
@@ -74,8 +75,6 @@ export interface PricingResult {
   baselinePriceBNB: number | null
 }
 
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
-
 const presaleByToken = new Map<string, Promise<Address>>()
 export function getPresaleAddress(
   client: PublicClient,
@@ -137,13 +136,13 @@ export async function getPricing(
 ): Promise<PricingResult> {
   const presale = await getPresaleAddress(client, tokenAddr)
 
-  if (presale === ZERO_ADDRESS) {
+  if (presale === zeroAddress) {
     return { stage: 'not_launched', priceBNB: null, tokenReserve: null, bnbReserve: null, pair: null, baselinePriceBNB: null }
   }
 
   const pair = await getPairAddress(client, presale)
 
-  if (pair === ZERO_ADDRESS) {
+  if (pair === zeroAddress) {
     const status = await client.readContract({
       address: presale,
       abi: presaleAbi,

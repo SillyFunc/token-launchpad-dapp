@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, type ChangeEvent } from 'react'
 import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
 import { useConnection, useConfig } from 'wagmi'
-import { signMessage } from '@wagmi/core'
 import { isAddress } from 'viem'
 import { Coins, Edit3, Loader2 } from 'lucide-react'
 
@@ -11,7 +10,7 @@ import {
   uploadTokenLogo,
   type TokenDetail,
 } from '@/api/token'
-import { getSignMessage } from '@/api/auth'
+import { requestAuthSignature } from '@/api/auth'
 import {
   Dialog,
   DialogContent,
@@ -134,8 +133,7 @@ export function EditTokenModal({
         if (logoFile) {
           coinImg = await uploadTokenLogo(logoFile)
         }
-        const message = await getSignMessage(address)
-        const signature = await signMessage(config, { message })
+        const auth = await requestAuthSignature(config, address)
         await updateTokenInfo({
           id: token.id,
           name: value.name.trim(),
@@ -152,9 +150,7 @@ export function EditTokenModal({
           website: value.links.website?.trim() ?? '',
           telegram: value.links.telegram?.trim() ?? '',
           twitter: value.links.twitter?.trim() ?? '',
-          address,
-          message,
-          signature,
+          ...auth,
         })
         toast.success('代币信息修改已保存！')
         onSuccess()

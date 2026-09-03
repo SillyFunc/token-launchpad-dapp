@@ -9,7 +9,8 @@ import {
   waitForTransactionReceipt,
 } from '@wagmi/core'
 import { parseEther } from 'viem'
-import { Loader2, Info } from 'lucide-react'
+import { Info } from 'lucide-react'
+import { Web3ActionButton } from '@/components/common/web3-action-button'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
 import { NumericInput } from '@/components/common/numeric-keypad'
@@ -22,44 +23,8 @@ import {
   getContractAddresses,
 } from '@/config/network'
 import { CoordinatorFactoryAbi } from '@/contracts/abi'
+import { parseContractError } from '@/lib/contract-error'
 import { cn } from '@/lib/utils'
-
-const KNOWN_ERRORS: Record<string, string> = {
-  TokenNotRegistered: '代币未在本平台登记',
-  NotTokenCreator: '仅创建者可配置预售条款',
-  AlreadyConfigured: '预售条款已配置，不可重复修改',
-  InvalidPrice: '预售价必须大于 0',
-  InvalidMaxBuyPerWallet: '单钱包上限必须大于 0',
-  CreatorBuyTokensWithoutFunding: '设置了购买代币目标但未附带购买注资',
-  InvalidVestingDelay: '释放周期须在 7 至 90 天之间',
-  InvalidVestingRate: '释放比例须在 5% 至 20% 之间',
-  SlippageTooHigh: '滑点不能超过 10%',
-  SoftCapTooLow: '软顶须不小于加池下限',
-}
-
-function parseContractError(err: unknown): string {
-  if (err instanceof Error || (err && typeof err === 'object')) {
-    const msg =
-      err instanceof Error
-        ? err.message
-        : String((err as { shortMessage?: string }).shortMessage ?? err)
-
-    if (msg.includes('User rejected') || msg.includes('rejected the request')) {
-      return '用户已取消交易'
-    }
-    if (msg.includes('insufficient funds') || msg.includes('exceeds balance')) {
-      return '钱包 BNB 余额不足以支付交易或注资'
-    }
-    if (msg.includes('Ownable: caller is not the owner')) {
-      return '仅所有者可操作'
-    }
-    for (const [name, text] of Object.entries(KNOWN_ERRORS)) {
-      if (msg.includes(name)) return text
-    }
-    return (err as { shortMessage?: string }).shortMessage || msg
-  }
-  return '配置失败，请稍后重试'
-}
 
 interface PresaleFormProps {
   token?: TokenDetail | null
@@ -100,12 +65,6 @@ export function PresaleForm({
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
     },
     onSubmit: async ({ value }) => {
-      // 1. 钱包连接校验
-      if (!address) {
-        toast.error('请先连接钱包')
-        return
-      }
-
       const hardcapWei = parseEther(value.hardcap || '0')
       const softcapWei = parseEther(value.softcap || '0')
       const minLiquidityWei = softcapWei // 自动对齐软顶
@@ -513,20 +472,15 @@ export function PresaleForm({
           })}
         >
           {({ canSubmit, isSubmitting }) => (
-            <button
+            <Web3ActionButton
               type="submit"
               disabled={!canSubmit}
+              loading={isSubmitting}
+              loadingText="配置并上链中…"
               className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 border border-white/60 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-[transform,opacity] active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-5 animate-spin" />
-                  <span>配置并上链中…</span>
-                </>
-              ) : (
-                <span>保存并配置预售</span>
-              )}
-            </button>
+              <span>保存并配置预售</span>
+            </Web3ActionButton>
           )}
         </form.Subscribe>
       </div>

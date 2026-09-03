@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useConnection, useConfig } from 'wagmi'
+import { useConfig } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   writeContract,
@@ -10,7 +10,6 @@ import {
 import {
   Coins,
   Rocket,
-  Loader2,
   AlertTriangle,
   CheckCircle2,
 } from 'lucide-react'
@@ -25,6 +24,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
 import { formatAddress } from '@/lib/format'
 import { useTokenGate } from '@/hooks/use-token-gate'
@@ -34,38 +34,7 @@ import {
   getTargetChainName,
 } from '@/config/network'
 import { CoordinatorFactoryAbi, PresaleAbi } from '@/contracts/abi'
-
-const KNOWN_ERRORS: Record<string, string> = {
-  TokenNotRegistered: '代币未在本平台登记',
-  NotTokenCreator: '仅代币创建者可操作',
-  AlreadyConfigured: '预售条款已在链上配置，不可重复修改',
-  PresaleNotOpen: '预售未开放',
-  NoTokensToClaim: '托管仓无代币余额',
-}
-
-function parseContractError(err: unknown): string {
-  if (err instanceof Error || (err && typeof err === 'object')) {
-    const msg =
-      err instanceof Error
-        ? err.message
-        : String((err as { shortMessage?: string }).shortMessage ?? err)
-
-    if (msg.includes('User rejected') || msg.includes('rejected the request')) {
-      return '用户已取消交易'
-    }
-    if (msg.includes('insufficient funds') || msg.includes('exceeds balance')) {
-      return '钱包 BNB 余额不足'
-    }
-    if (msg.includes('Ownable: caller is not the owner')) {
-      return '仅代币所有者可操作'
-    }
-    for (const [name, text] of Object.entries(KNOWN_ERRORS)) {
-      if (msg.includes(name)) return text
-    }
-    return (err as { shortMessage?: string }).shortMessage || msg
-  }
-  return '开启预售失败，请稍后重试'
-}
+import { parseContractError } from '@/lib/contract-error'
 
 export interface OpenPresaleModalProps {
   token: TokenDetail
@@ -83,7 +52,6 @@ export function OpenPresaleModal({
 }: OpenPresaleModalProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { address } = useConnection()
   const config = useConfig()
   const { presaleAddress, presaleConfigured } = useTokenGate({ token })
 
@@ -93,11 +61,6 @@ export function OpenPresaleModal({
   const tokenAddress = token.coinContractAddress || ''
 
   const handleExecute = async () => {
-    if (!address) {
-      toast.error('请先连接钱包')
-      return
-    }
-
     if (!presaleAddress) {
       toast.error('未找到该代币的托管仓合约')
       return
@@ -315,25 +278,17 @@ export function OpenPresaleModal({
               >
                 取消
               </Button>
-              <Button
+              <Web3ActionButton
                 type="button"
                 size="default"
-                disabled={isExecuting}
-                onClick={handleExecute}
+                onAction={handleExecute}
+                loading={isExecuting}
+                loadingText="开启中…"
                 className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
               >
-                {isExecuting ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    <span>开启中…</span>
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="size-3.5" />
-                    <span>确认并开启预售</span>
-                  </>
-                )}
-              </Button>
+                <Rocket className="size-3.5" />
+                <span>确认并开启预售</span>
+              </Web3ActionButton>
             </>
           )}
         </DialogFooter>

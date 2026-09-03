@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConnection, useConfig } from 'wagmi'
-import { signMessage, writeContract, waitForTransactionReceipt } from '@wagmi/core'
-import { formatEther } from 'viem'
+import { useConfig, useReadContract } from 'wagmi'
+import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
+import { formatEther, type Hex } from 'viem'
 import {
   Coins,
   Copy,
@@ -21,7 +21,6 @@ import {
 } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
-import { getSignMessage } from '@/api/auth'
 import {
   Card,
   CardHeader,
@@ -31,9 +30,12 @@ import {
   CardFooter,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
-import { formatAddress } from '@/lib/format'
-import { PresaleAbi } from '@/contracts/abi'
+import { formatAddress, formatTokenSupply } from '@/lib/format'
+import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
+import { parseContractError } from '@/lib/contract-error'
+import { useLocale } from '@/lib/i18n'
 import {
   useTokenGate,
   resolveTokenStage,
@@ -100,7 +102,6 @@ function TwitterIcon({ className }: { className?: string }) {
 
 export interface TokenCardProps {
   token: TokenDetail
-  totalSupplyText: string
   onEdit: (token: TokenDetail) => void
   onPresale: (token: TokenDetail) => void
   onOpenPresale: (token: TokenDetail) => void
@@ -110,14 +111,13 @@ export interface TokenCardProps {
 
 export function TokenCard({
   token,
-  totalSupplyText,
   onEdit,
   onPresale,
   onOpenPresale,
   onLaunch,
   onClaim,
 }: TokenCardProps) {
-  const { address: connectedAddress } = useConnection()
+  const { locale } = useLocale()
   const config = useConfig()
   const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
@@ -186,6 +186,22 @@ export function TokenCard({
 
   const tokenAddress = token.coinContractAddress || ''
 
+  // 独立读取当前代币发行总量，避免全局错位广播
+  const { data: totalSupplyData } = useReadContract({
+    address: tokenAddress ? (tokenAddress as `0x${string}`) : undefined,
+    abi: FlapTaxTokenV3Abi,
+    functionName: 'totalSupply',
+    chainId: DEFAULT_CHAIN_ID,
+    query: {
+      enabled: Boolean(tokenAddress),
+      staleTime: Infinity,
+    },
+  })
+  const totalSupplyText =
+    totalSupplyData !== undefined && totalSupplyData !== null
+      ? formatTokenSupply(totalSupplyData as bigint, locale)
+      : '--'
+
   // 单一状态机收敛生命周期，替代分散的多重布尔判断
   const stage: TokenCardStage = resolveTokenStage({
     isIssued,
@@ -204,17 +220,15 @@ export function TokenCard({
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleClaimTokens = async () => {
+  const handleClaimTokens = async (_userAddress: Hex) => {
     if (!canClaimAll.allowed) {
       toast.error(canClaimAll.reason || '当前不可领取代币')
       return
     }
-    if (!connectedAddress || !presaleAddress) return
+    if (!presaleAddress) return
 
     setIsClaiming(true)
     try {
-      const message = await getSignMessage(connectedAddress)
-      await signMessage(config, { message })
       const hash = await writeContract(config, {
         address: presaleAddress,
         abi: PresaleAbi,
@@ -226,9 +240,7 @@ export function TokenCard({
       toast.success('请关注您钱包里的代币余额', '领取成功')
       onClaim(token)
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : '代币领取失败，请稍后重试'
-      toast.error(msg, '领取失败')
+      toast.error(parseContractError(err, '代币领取失败，请稍后重试'), '领取失败')
     } finally {
       setIsClaiming(false)
     }
@@ -246,8 +258,7 @@ export function TokenCard({
       toast.error(canEndPresale.reason || '当前不可结束预售')
       return
     }
-    if (!connectedAddress || !presaleAddress) {
-      toast.error('请先连接钱包')
+    if (!presaleAddress) {
       return
     }
 
@@ -266,9 +277,7 @@ export function TokenCard({
       queryClient.invalidateQueries()
       toast.success('预售已成功结束！已进入待开盘加池阶段')
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : '结束预售失败，请稍后重试'
-      toast.error(msg, '结束失败')
+      toast.error(parseContractError(err, '结束预售失败，请稍后重试'), '结束失败')
     } finally {
       setIsEnding(false)
     }
@@ -279,7 +288,7 @@ export function TokenCard({
       toast.error('当前状态不可开盘加池')
       return
     }
-    if (!connectedAddress || !presaleAddress) return
+    if (!presaleAddress) return
 
     setIsLaunching(true)
     try {
@@ -296,9 +305,7 @@ export function TokenCard({
       queryClient.invalidateQueries()
       toast.success('代币已成功开盘加池！LP 已永久死锁')
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : '一键开盘失败，请稍后重试'
-      toast.error(msg, '开盘失败')
+      toast.error(parseContractError(err, '一键开盘失败，请稍后重试'), '开盘失败')
     } finally {
       setIsLaunching(false)
     }
@@ -668,20 +675,17 @@ export function TokenCard({
             case 'claim_or_setup':
               return (
                 <>
-                  <Button
+                  <Web3ActionButton
                     type="button"
                     variant="outline"
                     size="default"
-                    onClick={handleClaimTokens}
-                    disabled={isClaiming}
+                    onAction={handleClaimTokens}
+                    loading={isClaiming}
+                    loadingText="领取中…"
                   >
-                    {isClaiming ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Gift />
-                    )}
-                    <span>{isClaiming ? '领取中…' : '领取代币'}</span>
-                  </Button>
+                    <Gift />
+                    <span>领取代币</span>
+                  </Web3ActionButton>
                   <Button
                     type="button"
                     size="default"
@@ -723,40 +727,32 @@ export function TokenCard({
 
             case 'end_presale':
               return (
-                <Button
+                <Web3ActionButton
                   type="button"
                   size="default"
-                  onClick={handleEndPresale}
-                  disabled={isEnding}
+                  onAction={handleEndPresale}
+                  loading={isEnding}
+                  loadingText="结束中…"
                   className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
                 >
-                  {isEnding ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Rocket />
-                  )}
-                  <span>{isEnding ? '结束中…' : '结束预售'}</span>
-                </Button>
+                  <Rocket />
+                  <span>结束预售</span>
+                </Web3ActionButton>
               )
 
             case 'launch':
               return (
-                <Button
+                <Web3ActionButton
                   type="button"
                   size="default"
-                  onClick={handleLaunchPool}
-                  disabled={isLaunching}
+                  onAction={handleLaunchPool}
+                  loading={isLaunching}
+                  loadingText="开盘加池中…"
                   className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
                 >
-                  {isLaunching ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Rocket />
-                  )}
-                  <span>
-                    {isLaunching ? '开盘加池中…' : '一键开盘上线 (Launch)'}
-                  </span>
-                </Button>
+                  <Rocket />
+                  <span>一键开盘上线 (Launch)</span>
+                </Web3ActionButton>
               )
 
             case 'failed':

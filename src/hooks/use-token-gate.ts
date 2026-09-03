@@ -1,4 +1,4 @@
-import { useConnection, useReadContract, useWatchContractEvent } from 'wagmi'
+import { useConnection, useReadContracts, useWatchContractEvent } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
 import { isAddress, zeroAddress, parseEther, type Hex } from 'viem'
 
@@ -145,63 +145,51 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   // 安全占位地址（防止 wagmi 在 enabled: false 时因参数不匹配而报错）
   const queryTokenAddress = validTokenAddress ?? zeroAddress
 
-  // ================= 链上状态读取（仅当已发行有效地址时发起） =================
+  // ================= 链上状态读取（Multicall 批量打包，从 10 次 RPC 骤降至 2 次） =================
 
-  // 1. 代币是否在平台登记 (tokenExists)
+  // 1. Coordinator 批量读取: tokenExists, tokenConfigured, tokenCreators, tokenPresales
   const {
-    data: tokenExistsData,
-    isLoading: isExistsLoading,
-    isError: isExistsError,
-  } = useReadContract({
-    address: coordinator,
-    abi: CoordinatorFactoryAbi,
-    functionName: 'tokenExists',
-    args: [queryTokenAddress],
-    chainId: DEFAULT_CHAIN_ID,
+    data: coordinatorBatch,
+    isLoading: isCoordinatorLoading,
+    isError: isCoordinatorError,
+  } = useReadContracts({
+    contracts: [
+      {
+        address: coordinator,
+        abi: CoordinatorFactoryAbi,
+        functionName: 'tokenExists',
+        args: [queryTokenAddress],
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: coordinator,
+        abi: CoordinatorFactoryAbi,
+        functionName: 'tokenConfigured',
+        args: [queryTokenAddress],
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: coordinator,
+        abi: CoordinatorFactoryAbi,
+        functionName: 'tokenCreators',
+        args: [queryTokenAddress],
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: coordinator,
+        abi: CoordinatorFactoryAbi,
+        functionName: 'tokenPresales',
+        args: [queryTokenAddress],
+        chainId: DEFAULT_CHAIN_ID,
+      },
+    ],
     query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
   })
 
-  // 2. 预售是否已经配置过（一次性，不可重复修改）
-  const {
-    data: isConfiguredData,
-    isLoading: isConfiguredLoading,
-    isError: isConfiguredError,
-  } = useReadContract({
-    address: coordinator,
-    abi: CoordinatorFactoryAbi,
-    functionName: 'tokenConfigured',
-    args: [queryTokenAddress],
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasValidTokenAddress, staleTime: 10_000 },
-  })
-
-  // 3. 链上创建者地址
-  const {
-    data: onchainCreatorData,
-    isLoading: isCreatorLoading,
-    isError: isCreatorError,
-  } = useReadContract({
-    address: coordinator,
-    abi: CoordinatorFactoryAbi,
-    functionName: 'tokenCreators',
-    args: [queryTokenAddress],
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
-  })
-
-  // 4. 代币对应的托管仓地址 (支持后端传参或链上查得)
-  const {
-    data: presaleAddressData,
-    isLoading: isPresaleAddrLoading,
-    isError: isPresaleAddrError,
-  } = useReadContract({
-    address: coordinator,
-    abi: CoordinatorFactoryAbi,
-    functionName: 'tokenPresales',
-    args: [queryTokenAddress],
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
-  })
+  const tokenExistsData = coordinatorBatch?.[0]?.result as boolean | undefined
+  const isConfiguredData = coordinatorBatch?.[1]?.result as boolean | undefined
+  const onchainCreatorData = coordinatorBatch?.[2]?.result as string | undefined
+  const presaleAddressData = coordinatorBatch?.[3]?.result as string | undefined
 
   const rawPresaleAddr =
     options?.token?.presaleAddress ||
@@ -220,74 +208,56 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     presaleAddress && presaleAddress !== zeroAddress,
   )
 
-  // 5. 托管仓整体发射状态 [enabled, status, bnbAccumulated, tokensSubscribed, lpAdded, tokensClaimed]
+  // 2. Presale 托管仓批量读取: getLaunchStatus, owner, softCap, hardcap, presaleShare
   const {
-    data: launchStatusData,
-    isLoading: isStatusLoading,
-    isError: isStatusError,
-    refetch: refetchLaunchStatus,
-  } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'getLaunchStatus',
-    chainId: DEFAULT_CHAIN_ID,
+    data: presaleBatch,
+    isLoading: isPresaleLoading,
+    isError: isPresaleError,
+    refetch: refetchPresaleBatch,
+  } = useReadContracts({
+    contracts: [
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'getLaunchStatus',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'owner',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'softCap',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'hardcap',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'presaleShare',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+    ],
     query: {
       enabled: hasPresaleContract,
       staleTime: 30_000,
     },
   })
 
-  // 6. 直接读取托管仓 presaleStatus() 进行强双重兜底
-  const { data: directPresaleStatusData } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'presaleStatus',
-    chainId: DEFAULT_CHAIN_ID,
-    query: {
-      enabled: hasPresaleContract,
-      staleTime: 30_000,
-    },
-  })
-
-  // 7. 托管仓所有者
-  const {
-    data: presaleOwnerData,
-    isLoading: isOwnerLoading,
-    isError: isOwnerError,
-  } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'owner',
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasPresaleContract, staleTime: 30_000 },
-  })
-
-  // 8. 预售软顶 (softCap)
-  const { data: softCapData, isLoading: isSoftCapLoading } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'softCap',
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasPresaleContract, staleTime: 30_000 },
-  })
-
-  // 9. 预售硬顶 (hardcap)
-  const { data: hardCapData, isLoading: isHardCapLoading } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'hardcap',
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasPresaleContract, staleTime: 30_000 },
-  })
-
-  // 10. 预售总份额 (presaleShare)
-  const { data: presaleShareData } = useReadContract({
-    address: queryPresaleAddress,
-    abi: PresaleAbi,
-    functionName: 'presaleShare',
-    chainId: DEFAULT_CHAIN_ID,
-    query: { enabled: hasPresaleContract, staleTime: 60_000 },
-  })
+  const launchStatusData = presaleBatch?.[0]?.result
+  const presaleOwnerData = presaleBatch?.[1]?.result as string | undefined
+  const softCapData = presaleBatch?.[2]?.result as bigint | undefined
+  const hardCapData = presaleBatch?.[3]?.result as bigint | undefined
+  const presaleShareData = presaleBatch?.[4]?.result as bigint | undefined
 
   // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
@@ -298,9 +268,9 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     enabled: Boolean(options?.watch) && hasPresaleContract,
     onLogs: () => {
       void queryClient.invalidateQueries({
-        queryKey: ['readContract', { address: presaleAddress }],
+        queryKey: ['readContracts'],
       })
-      void refetchLaunchStatus()
+      void refetchPresaleBatch()
     },
   })
 
@@ -313,35 +283,21 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   )
 
   const isChainLoading = hasValidTokenAddress
-    ? isExistsLoading ||
-      isConfiguredLoading ||
-      isCreatorLoading ||
-      isPresaleAddrLoading ||
-      (hasPresaleContract &&
-        (isStatusLoading ||
-          isOwnerLoading ||
-          isSoftCapLoading ||
-          isHardCapLoading))
+    ? isCoordinatorLoading || (hasPresaleContract && isPresaleLoading)
     : false
 
   const isChainError = hasValidTokenAddress
-    ? isExistsError ||
-      isConfiguredError ||
-      isCreatorError ||
-      isPresaleAddrError ||
-      (hasPresaleContract && (isStatusError || isOwnerError))
+    ? isCoordinatorError || (hasPresaleContract && isPresaleError)
     : false
   const presaleConfigured = Boolean(isConfiguredData)
 
   // 兼容器件返回值：支持命名对象属性和数字数组索引两种解构
   const rawStatus =
-    directPresaleStatusData !== undefined
-      ? directPresaleStatusData
-      : (launchStatusData as any)?.status !== undefined
-        ? (launchStatusData as any).status
-        : Array.isArray(launchStatusData)
-          ? launchStatusData[1]
-          : undefined
+    (launchStatusData as any)?.status !== undefined
+      ? (launchStatusData as any).status
+      : Array.isArray(launchStatusData)
+        ? launchStatusData[1]
+        : undefined
 
   const presaleStatus =
     rawStatus !== undefined ? Number(rawStatus) : undefined
@@ -514,7 +470,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         isLoading: false,
       }
     }
-    if (isStatusError) {
+    if (isPresaleError) {
       return {
         allowed: false,
         reason: '预售合约状态读取失败，请稍后重试。',

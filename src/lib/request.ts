@@ -1,5 +1,5 @@
 import type { ApiResponse } from '@/api/types'
-import axios, { Axios, type AxiosRequestConfig } from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 
 /**
  * 业务逻辑异常类

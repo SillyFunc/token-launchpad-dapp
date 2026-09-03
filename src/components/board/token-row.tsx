@@ -1,24 +1,38 @@
 import { useNavigate } from 'react-router'
+import { useReadContract } from 'wagmi'
 import { Coins } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
 import { formatNumber } from '@/lib/format'
 import type { Locale } from '@/lib/i18n'
 import { useTokenPrice } from '@/hooks/use-token-price'
+import { FlapTaxTokenV3Abi } from '@/contracts/abi'
+import { DEFAULT_CHAIN_ID } from '@/config/network'
 
 export interface TokenRowProps {
   token: TokenDetail
-  totalSupplyData: bigint | undefined
   locale: Locale
   bnbUsd: number
 }
 
-export function TokenRow({ token, totalSupplyData, locale, bnbUsd }: TokenRowProps) {
+export function TokenRow({ token, locale, bnbUsd }: TokenRowProps) {
   const navigate = useNavigate()
   const tokenAddress = token.coinContractAddress || ''
-  const { priceBNB, priceUSD, mcapUSD, tvlUSD, stage, changePercent } = useTokenPrice(
+
+  const { data: totalSupplyData } = useReadContract({
+    address: tokenAddress ? (tokenAddress as `0x${string}`) : undefined,
+    abi: FlapTaxTokenV3Abi,
+    functionName: 'totalSupply',
+    chainId: DEFAULT_CHAIN_ID,
+    query: {
+      enabled: Boolean(tokenAddress),
+      staleTime: Infinity,
+    },
+  })
+
+  const { priceUSD, mcapUSD, tvlUSD, stage, changePercent } = useTokenPrice(
     tokenAddress as `0x${string}`,
-    totalSupplyData,
+    totalSupplyData as bigint | undefined,
     bnbUsd,
   )
 

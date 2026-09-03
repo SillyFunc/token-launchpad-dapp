@@ -2,7 +2,6 @@ import {
   DEFAULT_CHAIN_ID,
   CHAINS_CONFIG,
   getContractAddresses as getAddresses,
-  type ChainMetadata,
 } from '@/config/network'
 
 export { DEFAULT_CHAIN_ID }

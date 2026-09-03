@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useConnection, useConfig } from 'wagmi'
-import { signMessage } from '@wagmi/core'
-import { type Hex } from 'viem'
+import { type Hex, zeroAddress } from 'viem'
 import {
   Coins,
   Rocket,
@@ -15,7 +14,7 @@ import {
 } from 'lucide-react'
 
 import { parseTxHash, type TokenDetail } from '@/api/token'
-import { getSignMessage } from '@/api/auth'
+import { requestAuthSignature } from '@/api/auth'
 import {
   useCreateToken,
   useCreationFee,
@@ -109,8 +108,7 @@ export function IssueTokenModal({
 
     setIsExecuting(true)
     try {
-      const message = await getSignMessage(address)
-      const signature = await signMessage(config, { message })
+      const auth = await requestAuthSignature(config, address)
 
       const result = await createToken({
         name: token.name,
@@ -118,9 +116,7 @@ export function IssueTokenModal({
         meta: token.meta || token.zhIntroduction || '',
         buyTax: token.buyTax ?? 0,
         sellTax: token.sellTax ?? 0,
-        feeRecipient:
-          (token.feeRecipient as Hex) ||
-          '0x0000000000000000000000000000000000000000',
+        feeRecipient: (token.feeRecipient as Hex) || zeroAddress,
         taxDurationDays: Number(token.taxDuration) || 30,
         antiFarmerDurationDays: Number(token.antiFarmerDuration) || 0,
         salt: token.salt ? (token.salt as Hex) : undefined,
@@ -131,9 +127,7 @@ export function IssueTokenModal({
           await parseTxHash({
             id: token.id,
             hash: result.txHash,
-            address,
-            message,
-            signature,
+            ...auth,
           })
         } catch (e) {
           console.error('Failed to sync tx hash to backend', e)

@@ -20,7 +20,6 @@ import {
   ExternalLink,
   Globe,
   Send,
-  Loader2,
   Gift,
   AlertTriangle,
   TrendingUp,
@@ -28,6 +27,7 @@ import {
 
 import { getTokenByContractAddress } from '@/api/token'
 import { Button } from '@/components/ui/button'
+import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toast'
@@ -40,6 +40,7 @@ import {
 } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
+import { parseContractError } from '@/lib/contract-error'
 import { cn } from '@/lib/utils'
 
 function TwitterIcon({ className }: { className?: string }) {
@@ -215,11 +216,6 @@ export function TokenDetailPage() {
 
   // ⑦ 散户参与预售认购
   const handleSubscribe = async () => {
-    if (!userAddress) {
-      toast.error('请先连接钱包')
-      return
-    }
-
     if (!presaleAddress) {
       toast.error('未找到该代币的预售托管仓')
       return
@@ -269,8 +265,7 @@ export function TokenDetailPage() {
       setSubscribeAmount('')
       toast.success('认购成功！代币份额已锁定在托管仓')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '认购失败，请稍后重试'
-      toast.error(msg, '认购失败')
+      toast.error(parseContractError(err, '认购失败，请稍后重试'), '认购失败')
     } finally {
       setIsSubscribing(false)
     }
@@ -278,7 +273,7 @@ export function TokenDetailPage() {
 
   // ⑧ 提取解锁代币
   const handleClaimVesting = async () => {
-    if (!userAddress || !presaleAddress) return
+    if (!presaleAddress) return
     if (userClaimable <= 0n) {
       toast.info('当前暂无可领取的代币份额')
       return
@@ -301,8 +296,7 @@ export function TokenDetailPage() {
       void refetchVesting()
       toast.success('代币已成功领入钱包！')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '领取失败，请稍后重试'
-      toast.error(msg, '领取失败')
+      toast.error(parseContractError(err, '领取失败，请稍后重试'), '领取失败')
     } finally {
       setIsClaimingVesting(false)
     }
@@ -725,30 +719,25 @@ export function TokenDetailPage() {
               </div>
 
               {/* 参与预售主按钮 */}
-              <Button
+              <Web3ActionButton
                 type="button"
                 size="default"
-                onClick={handleSubscribe}
-                disabled={isSubscribing || presaleStatus !== 1}
+                onAction={handleSubscribe}
+                loading={isSubscribing}
+                loadingText="认购处理中…"
+                disabled={presaleStatus !== 1}
                 className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
               >
-                {isSubscribing ? (
-                  <>
-                    <Loader2 className="size-5 animate-spin" />
-                    <span>认购处理中…</span>
-                  </>
-                ) : (
-                  <span>
-                    {presaleStatus === 0
-                      ? '预售尚未开启'
-                      : presaleStatus === 1
-                        ? '参与预售 (Subscribe)'
-                        : presaleStatus === 2
-                          ? '预售已结束 (待开盘)'
-                          : '预售已结束'}
-                  </span>
-                )}
-              </Button>
+                <span>
+                  {presaleStatus === 0
+                    ? '预售尚未开启'
+                    : presaleStatus === 1
+                      ? '参与预售 (Subscribe)'
+                      : presaleStatus === 2
+                        ? '预售已结束 (待开盘)'
+                        : '预售已结束'}
+                </span>
+              </Web3ActionButton>
             </div>
           </TabsContent>
 
@@ -790,31 +779,24 @@ export function TokenDetailPage() {
               </div>
             </div>
 
-            <Button
+            <Web3ActionButton
               type="button"
               size="default"
-              onClick={handleClaimVesting}
-              disabled={isClaimingVesting || userClaimable <= 0n || presaleStatus !== 3}
+              onAction={handleClaimVesting}
+              loading={isClaimingVesting}
+              loadingText="领取中…"
+              disabled={userClaimable <= 0n || presaleStatus !== 3}
               className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
             >
-              {isClaimingVesting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  <span>领取中…</span>
-                </>
-              ) : (
-                <>
-                  <Gift className="size-4" />
-                  <span>
-                    {presaleStatus !== 3
-                      ? '待开盘上线后方可领取'
-                      : userClaimable > 0n
-                        ? '领取代币份额'
-                        : '暂无可领取份额'}
-                  </span>
-                </>
-              )}
-            </Button>
+              <Gift className="size-4" />
+              <span>
+                {presaleStatus !== 3
+                  ? '待开盘上线后方可领取'
+                  : userClaimable > 0n
+                    ? '领取代币份额'
+                    : '暂无可领取份额'}
+              </span>
+            </Web3ActionButton>
           </TabsContent>
 
           {/* ===================== TAB 3: 图表与交易 ===================== */}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useConnection, useReadContract } from 'wagmi'
+import { useConnection } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
@@ -10,15 +10,10 @@ import { Button } from '@/components/ui/button'
 import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
 import { OpenPresaleModal } from '@/components/dashboard/open-presale-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
-import { FlapTaxTokenV3Abi } from '@/contracts/abi'
-import { formatTokenSupply } from '@/lib/format'
-import { useLocale } from '@/lib/i18n'
-import { DEFAULT_CHAIN_ID } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 
 export const Dashboard = () => {
   const { address } = useConnection()
-  const { locale } = useLocale()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
@@ -37,22 +32,6 @@ export const Dashboard = () => {
   })
 
   const tokenList = Array.isArray(tokens) ? tokens : []
-
-  const firstIssued = tokenList.find((t) => t.coinContractAddress)
-  const totalSupplyData = useReadContract({
-    address: firstIssued?.coinContractAddress as `0x${string}` | undefined,
-    abi: FlapTaxTokenV3Abi,
-    functionName: 'totalSupply',
-    chainId: DEFAULT_CHAIN_ID,
-    query: {
-      enabled: Boolean(firstIssued),
-      staleTime: Infinity,
-    },
-  }).data as bigint | undefined
-  const totalSupplyText =
-    totalSupplyData !== undefined && totalSupplyData !== null
-      ? formatTokenSupply(totalSupplyData, locale)
-      : '--'
 
   const handlePresale = (token: TokenDetail) => {
     if (token.id) {
@@ -209,7 +188,6 @@ export const Dashboard = () => {
             <TokenCard
               key={token.id || token.coinContractAddress}
               token={token}
-              totalSupplyText={totalSupplyText}
               onEdit={handleEdit}
               onPresale={handlePresale}
               onOpenPresale={(t) => setOpeningPresaleToken(t)}

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useReadContract } from 'wagmi'
 import {
   Flame,
   Search,
@@ -17,8 +16,6 @@ import { getPopularTokens, type TokenDetail } from '@/api/token'
 import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
 import { TokenRow } from '@/components/board/token-row'
-import { FlapTaxTokenV3Abi } from '@/contracts/abi'
-import { DEFAULT_CHAIN_ID } from '@/config/network'
 
 export const Board = () => {
   const { locale } = useLocale()
@@ -47,7 +44,6 @@ export const Board = () => {
     data: tokens,
     isLoading,
     isError,
-    isRefetching,
     refetch,
   } = useQuery({
     queryKey: ['popularTokens'],
@@ -58,18 +54,6 @@ export const Board = () => {
   const tokenList: TokenDetail[] = Array.isArray(tokens?.list)
     ? tokens.list
     : []
-
-  const supplyToken = tokenList.find((t) => t.coinContractAddress)
-  const totalSupplyData = useReadContract({
-    address: supplyToken?.coinContractAddress as `0x${string}` | undefined,
-    abi: FlapTaxTokenV3Abi,
-    functionName: 'totalSupply',
-    chainId: DEFAULT_CHAIN_ID,
-    query: {
-      enabled: Boolean(supplyToken),
-      staleTime: Infinity,
-    },
-  }).data as bigint | undefined
 
   const filterOptions = ['热门', '最新', '市值榜', '涨幅榜']
 
@@ -251,7 +235,6 @@ export const Board = () => {
               <TokenRow
                 key={token.id}
                 token={token}
-                totalSupplyData={totalSupplyData}
                 locale={locale}
                 bnbUsd={bnbUsd}
               />
