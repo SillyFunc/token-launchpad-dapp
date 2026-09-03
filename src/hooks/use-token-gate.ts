@@ -107,6 +107,10 @@ export interface TokenGateResult {
   hardCap: bigint
   isSoftCapReached: boolean
   isSoldOut: boolean
+  vestingDelay: bigint
+  vestingRate: bigint
+  onchainPresalePrice: bigint
+  onchainMaxBuy: bigint
 
   // 动作权限守卫
   canEdit: GateAction
@@ -246,6 +250,30 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         functionName: 'presaleShare',
         chainId: DEFAULT_CHAIN_ID,
       },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'vestingDelay',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'vestingRate',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'presaleTokenPrice',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'maxBuyPerWallet',
+        chainId: DEFAULT_CHAIN_ID,
+      },
     ],
     query: {
       enabled: hasPresaleContract,
@@ -258,6 +286,10 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const softCapData = presaleBatch?.[2]?.result as bigint | undefined
   const hardCapData = presaleBatch?.[3]?.result as bigint | undefined
   const presaleShareData = presaleBatch?.[4]?.result as bigint | undefined
+  const rawVestingDelay = (presaleBatch?.[5]?.result as bigint | undefined) ?? 0n
+  const rawVestingRate = (presaleBatch?.[6]?.result as bigint | undefined) ?? 0n
+  const rawPresalePrice = (presaleBatch?.[7]?.result as bigint | undefined) ?? 0n
+  const rawMaxBuy = (presaleBatch?.[8]?.result as bigint | undefined) ?? 0n
 
   // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
@@ -355,6 +387,29 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       : parseEther(String(options?.token?.hardcap || '0'))
 
   const presaleShare = (presaleShareData as bigint | undefined) ?? 0n
+
+  const vestingDelay =
+    rawVestingDelay > 0n
+      ? rawVestingDelay
+      : BigInt(
+          (Number(options?.token?.vestingDelay) || 7) *
+            (Number(options?.token?.vestingDelay) <= 90 ? 86400 : 1),
+        )
+
+  const vestingRate =
+    rawVestingRate > 0n
+      ? rawVestingRate
+      : BigInt(Number(options?.token?.vestingRate) || 10)
+
+  const onchainPresalePrice =
+    rawPresalePrice > 0n
+      ? rawPresalePrice
+      : parseEther(String(options?.token?.presaleTokenPrice || '0'))
+
+  const onchainMaxBuy =
+    rawMaxBuy > 0n
+      ? rawMaxBuy
+      : parseEther(String(options?.token?.maxBuyPerWallet || '0'))
 
   const isSoftCapReached = softCap > 0n && bnbAccumulated >= softCap
   const isSoldOut = presaleShare > 0n && tokensSubscribed >= presaleShare
@@ -569,6 +624,10 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     hardCap,
     isSoftCapReached,
     isSoldOut,
+    vestingDelay,
+    vestingRate,
+    onchainPresalePrice,
+    onchainMaxBuy,
     canEdit,
     canIssue,
     canSetupPresale,

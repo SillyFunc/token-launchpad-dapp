@@ -102,6 +102,10 @@ export function TokenDetailPage() {
     softCap,
     hardCap,
     isSoftCapReached,
+    vestingDelay,
+    vestingRate,
+    onchainPresalePrice,
+    onchainMaxBuy,
   } = useTokenGate({
     tokenAddress,
     token,
@@ -164,8 +168,15 @@ export function TokenDetailPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // 计算与格式化衍生数据
-  const presalePriceNum = Number(token?.presaleTokenPrice || 0)
+  // 计算与格式化衍生数据（链上权威数据优先，后端数据兜底）
+  const presalePriceNum =
+    onchainPresalePrice > 0n
+      ? Number(formatEther(onchainPresalePrice))
+      : Number(token?.presaleTokenPrice || 0)
+  const maxBuyNum =
+    onchainMaxBuy > 0n
+      ? Number(formatEther(onchainMaxBuy))
+      : Number(token?.maxBuyPerWallet || 0)
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
   const tokensSubscribedNum = Number(formatEther(tokensSubscribed))
   const presaleShareNum =
@@ -365,7 +376,7 @@ export function TokenDetailPage() {
           <span className="font-semibold text-neutral-200">
             {hasPresale
               ? presaleStatus === 1
-                ? '认购中 (Live)'
+                ? '认购中'
                 : presaleStatus === 2
                   ? '认购结束 (待开盘)'
                   : '已上线交易'
@@ -513,13 +524,13 @@ export function TokenDetailPage() {
               value="presale"
               className="flex-1 py-2.5 text-xs font-bold data-active:text-[#FE810B] data-active:border-b-2 data-active:border-[#FE810B]"
             >
-              预售 (Presale)
+              预售
             </TabsTrigger>
             <TabsTrigger
               value="vesting"
               className="flex-1 py-2.5 text-xs font-bold data-active:text-[#FE810B] data-active:border-b-2 data-active:border-[#FE810B]"
             >
-              解锁 (Vesting)
+              解锁
             </TabsTrigger>
             <TabsTrigger
               value="chart"
@@ -534,53 +545,61 @@ export function TokenDetailPage() {
             {/* 上部：预售参数详情列表 (Figma #6501:6205) */}
             <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#141517] p-4 text-xs">
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">预售总份额 (50% 总量)</span>
+                <span className="text-neutral-400">预售总份额</span>
                 <span className="font-mono font-medium text-white">
-                  {presaleShareNum.toLocaleString()} {token?.symbol} (50%)
+                  {presaleShareNum.toLocaleString()} {token?.symbol}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">预售价 (Presale Price)</span>
+                <span className="text-neutral-400">预售价</span>
                 <span className="font-mono font-medium text-white">
                   {presalePriceNum > 0 ? `${presalePriceNum} BNB` : '--'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">募资硬顶 (Hard Cap)</span>
+                <span className="text-neutral-400">募资硬顶</span>
                 <span className="font-mono font-medium text-white">
                   {hardCapNum > 0 ? `${hardCapNum} BNB` : '不设硬顶'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">预售软顶 (Soft Cap)</span>
+                <span className="text-neutral-400">预售软顶</span>
                 <span className="font-mono font-medium text-white">
                   {softCapNum > 0 ? `${softCapNum} BNB` : '--'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">单钱包认购上限 (Max buy)</span>
+                <span className="text-neutral-400">单钱包认购上限</span>
                 <span className="font-mono font-medium text-white">
-                  {token?.maxBuyPerWallet
-                    ? `${token.maxBuyPerWallet} 枚`
-                    : '--'}
+                  {maxBuyNum > 0 ? `${formatNumber(maxBuyNum)} 枚` : '--'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">释放周期 (Vesting delay)</span>
+                <span className="text-neutral-400">释放周期</span>
                 <span className="font-mono font-medium text-white">
-                  每 {token?.vestingDelay || 7} 天释放 {token?.vestingRate || 10}%
+                  每{' '}
+                  {Number(vestingDelay) <= 0
+                    ? '7 天'
+                    : Number(vestingDelay) % 86400 === 0
+                      ? `${Number(vestingDelay) / 86400} 天`
+                      : Number(vestingDelay) % 3600 === 0
+                        ? `${Number(vestingDelay) / 3600} 小时`
+                        : Number(vestingDelay) % 60 === 0
+                          ? `${Number(vestingDelay) / 60} 分钟`
+                          : `${Number(vestingDelay)} 秒`}{' '}
+                  释放 {Number(vestingRate)}%
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
-                <span className="text-neutral-400">底池配比 (Liquidity Pair)</span>
+                <span className="text-neutral-400">底池配比</span>
                 <span className="font-mono font-medium text-white">
-                  100% 募资 BNB + 20% 代币 (LP 永久死锁)
+                  100% 募资 BNB + 20% 代币
                 </span>
               </div>
             </div>
@@ -609,7 +628,7 @@ export function TokenDetailPage() {
               {/* 软顶达成进度条 */}
               <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-neutral-300">软顶达成进度 (Soft Cap)</span>
+                  <span className="text-neutral-300">软顶达成进度</span>
                   <span className="font-mono text-neutral-300">
                     <strong className="text-white">
                       {bnbAccumulatedNum.toFixed(4)}
@@ -636,7 +655,7 @@ export function TokenDetailPage() {
                 <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-neutral-300">
-                      募资硬顶进度 (Hard Cap)
+                      募资硬顶进度
                     </span>
                     <span className="font-mono text-neutral-300">
                       <strong className="text-white">
@@ -732,7 +751,7 @@ export function TokenDetailPage() {
                   {presaleStatus === 0
                     ? '预售尚未开启'
                     : presaleStatus === 1
-                      ? '参与预售 (Subscribe)'
+                      ? '参与预售'
                       : presaleStatus === 2
                         ? '预售已结束 (待开盘)'
                         : '预售已结束'}
@@ -745,14 +764,14 @@ export function TokenDetailPage() {
           <TabsContent value="vesting" className="space-y-4">
             <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#141517] p-4 text-xs">
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">我的认购总份额 (Share)</span>
+                <span className="text-neutral-400">我的认购总份额</span>
                 <span className="font-mono font-bold text-white">
                   {Number(formatEther(userShare)).toLocaleString()} {token?.symbol}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">已领取代币 (Claimed)</span>
+                <span className="text-neutral-400">已领取代币</span>
                 <span className="font-mono font-medium text-neutral-300">
                   {Number(formatEther(userClaimed)).toLocaleString()}{' '}
                   {token?.symbol}
@@ -760,7 +779,7 @@ export function TokenDetailPage() {
               </div>
 
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">当前可领取 (Claimable)</span>
+                <span className="text-neutral-400">当前可领取</span>
                 <span className="font-mono font-bold text-[#FFA546]">
                   {Number(formatEther(userClaimable)).toLocaleString()}{' '}
                   {token?.symbol}
@@ -852,7 +871,7 @@ export function TokenDetailPage() {
               </div>
 
               <div className="flex flex-col gap-1 border border-[#2F3737] bg-[#181a1d] p-3">
-                <span className="text-[11px] text-neutral-400">流通市值 (Market Cap)</span>
+                <span className="text-[11px] text-neutral-400">流通市值</span>
                 <span className="font-mono text-base font-bold text-[#FFA546]">
                   {tokenPriceData.mcapUSD !== null
                     ? `$${formatNumber(tokenPriceData.mcapUSD, 'zh-TW')}`

@@ -4,11 +4,11 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from '@tanstack/react-form'
 import { useConfig } from 'wagmi'
 import {
-  signMessage,
   writeContract,
+  readContract,
   waitForTransactionReceipt,
 } from '@wagmi/core'
-import { parseEther } from 'viem'
+import { parseEther, isAddress, type Hex } from 'viem'
 import { Info } from 'lucide-react'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 
@@ -16,7 +16,7 @@ import { FormSectionTitle } from '@/components/common/form-section-title'
 import { NumericInput } from '@/components/common/numeric-keypad'
 import { toast } from '@/components/ui/toast'
 import { updateTokenInfo, type TokenDetail } from '@/api/token'
-import { getSignMessage } from '@/api/auth'
+import { requestAuthSignature } from '@/api/auth'
 import { CreatorBuySection } from '@/components/presale/creator-buy-section'
 import {
   DEFAULT_CHAIN_ID,
@@ -44,6 +44,13 @@ export function PresaleForm({
   const queryClient = useQueryClient()
   const config = useConfig()
 
+  const initialHardcap = token?.hardcap ? String(token.hardcap) : ''
+  const initialSoftcap = initialHardcap
+    ? String(Number((Number(initialHardcap) * 0.5).toFixed(4)))
+    : token?.softcap || token?.soft
+      ? String(token.softcap || token.soft)
+      : ''
+
   const form = useForm({
     defaultValues: {
       presaleTokenPrice: token?.presaleTokenPrice
@@ -52,11 +59,8 @@ export function PresaleForm({
       maxBuyPerWallet: token?.maxBuyPerWallet
         ? String(token.maxBuyPerWallet)
         : '',
-      hardcap: token?.hardcap ? String(token.hardcap) : '',
-      softcap:
-        token?.softcap || token?.soft
-          ? String(token.softcap || token.soft)
-          : '',
+      hardcap: initialHardcap,
+      softcap: initialSoftcap,
       vestingDelay: token?.vestingDelay ? String(token.vestingDelay) : '7',
       vestingRate: token?.vestingRate ? Number(token.vestingRate) : 10,
       creatorBuyTokens: token?.creatorBuyTokens
@@ -65,15 +69,17 @@ export function PresaleForm({
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
     },
     onSubmit: async ({ value }) => {
+      const hardcapNum = Number(value.hardcap || '0')
+      const softcapNum = Number((hardcapNum * 0.5).toFixed(4))
       const hardcapWei = parseEther(value.hardcap || '0')
-      const softcapWei = parseEther(value.softcap || '0')
+      const softcapWei = parseEther(String(softcapNum))
       const minLiquidityWei = softcapWei // 自动对齐软顶
       const priceWei = parseEther(value.presaleTokenPrice || '0.001')
       const maxBuyWei = parseEther(value.maxBuyPerWallet || '1000')
 
-      const rawDelay = Number(value.vestingDelay) || 7
-      const vestingDelaySec =
-        rawDelay > 90 ? BigInt(rawDelay) : BigInt(rawDelay) * 86400n
+      // 测试网环境：无论 UI 输入多少，接口与合约统一固定传入 5 分钟 (300 秒)
+      const FIXED_VESTING_DELAY_SEC = 300
+      const vestingDelaySec = BigInt(FIXED_VESTING_DELAY_SEC)
 
       const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
       let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
@@ -85,17 +91,53 @@ export function PresaleForm({
       }
 
       try {
+        const resolvedTokenAddress =
+          tokenAddress ||
+          token?.coinContractAddress ||
+          token?.address ||
+          ''
+
+        if (!resolvedTokenAddress || !isAddress(resolvedTokenAddress)) {
+          toast.error('未找到有效的代币合约地址，请先在控制台完成代币发行')
+          return
+        }
+
         const coordinator =
           getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
-        // ① 链上调用 coordinator.setupPresale（一次性配置 + 购买注资）
+        // 预检：若链上已经配置过预售，提前友好拦截，避免触发合约 Revert 与钱包 RPC 报错
+        try {
+          const isConfigured = (await readContract(config, {
+            address: coordinator,
+            abi: CoordinatorFactoryAbi,
+            functionName: 'tokenConfigured',
+            args: [resolvedTokenAddress as Hex],
+            chainId: DEFAULT_CHAIN_ID,
+          })) as boolean
+
+          if (isConfigured) {
+            toast.warning(
+              '预售条款已经在链上配置过（一次性操作，不可重复修改），请直接前往控制台开启预售！',
+            )
+            navigate('/dashboard')
+            return
+          }
+        } catch (checkErr) {
+          console.warn('Pre-check tokenConfigured failed:', checkErr)
+        }
+
+        // ① 先获取钱包签名鉴权
+        const auth = await requestAuthSignature(config, address)
+
+        // ② 链上调用 coordinator.setupPresale（一次性配置 + 购买注资）
         const setupHash = await writeContract(config, {
           address: coordinator,
           abi: CoordinatorFactoryAbi,
           functionName: 'setupPresale',
+          account: address,
           chainId: DEFAULT_CHAIN_ID,
           args: [
-            tokenAddress as `0x${string}`,
+            resolvedTokenAddress as Hex,
             {
               presaleTokenPrice: priceWei,
               maxBuyPerWallet: maxBuyWei,
@@ -116,10 +158,7 @@ export function PresaleForm({
           chainId: DEFAULT_CHAIN_ID,
         })
 
-        // ② 签名并保存预售信息到后端数据库
-        const message = await getSignMessage(address)
-        const signature = await signMessage(config, { message })
-
+        // ③ 同步预售信息到后端数据库
         await updateTokenInfo({
           id: token?.id ?? '',
           name: token?.name ?? '',
@@ -140,18 +179,16 @@ export function PresaleForm({
           presaleTokenPrice: value.presaleTokenPrice,
           maxBuyPerWallet: value.maxBuyPerWallet,
           hardcap: value.hardcap,
-          softcap: value.softcap,
-          minLiquidityAmount: value.softcap,
+          softcap: String(softcapNum),
+          minLiquidityAmount: String(softcapNum),
           startTime: 0,
           endTime: 0,
-          vestingDelay: Number(value.vestingDelay) || 7,
+          vestingDelay: FIXED_VESTING_DELAY_SEC,
           vestingRate: Number(value.vestingRate) || 10,
           slippage: 0,
           creatorBuyTokens: value.creatorBuyTokens || '0',
           creatorBuyBnb: value.creatorBuyBnb || '0',
-          address,
-          message,
-          signature,
+          ...auth,
         })
 
         toast.success('预售条款已成功配置上链！前往控制台开启认购')
@@ -271,10 +308,21 @@ export function PresaleForm({
                 name={field.name}
                 placeholder=""
                 value={field.state.value}
-                onChange={field.handleChange}
+                onChange={(val) => {
+                  field.handleChange(val)
+                  const num = Number(val)
+                  if (val && !Number.isNaN(num) && num > 0) {
+                    form.setFieldValue(
+                      'softcap',
+                      String(Number((num * 0.5).toFixed(4))),
+                    )
+                  } else {
+                    form.setFieldValue('softcap', '')
+                  }
+                }}
                 onBlur={field.handleBlur}
                 title="设置募资硬顶 (BNB)"
-                description="募集达到硬顶后认购提前结束；填 0 表示不限"
+                description="募集达到硬顶后认购提前结束；软顶将自动联动设置为其 50%"
                 unit="BNB"
                 allowDecimal
                 maxDecimals={4}
@@ -292,8 +340,11 @@ export function PresaleForm({
               if (!value || Number.isNaN(n) || n <= 0)
                 return '请输入大于 0 的软顶金额'
               const hardcap = Number(fieldApi.form.getFieldValue('hardcap'))
-              if (Number.isFinite(hardcap) && hardcap > 0 && n > hardcap)
-                return '软顶金额不能超过硬顶'
+              if (!Number.isFinite(hardcap) || hardcap <= 0)
+                return '请先输入有效的硬顶金额'
+              const expected = Number((hardcap * 0.5).toFixed(4))
+              if (Math.abs(n - expected) > 0.0001)
+                return `软顶必须是硬顶的 50%（当前硬顶 ${hardcap} BNB，软顶应为 ${expected} BNB）`
               return undefined
             },
           }}
@@ -312,7 +363,7 @@ export function PresaleForm({
                 onChange={field.handleChange}
                 onBlur={field.handleBlur}
                 title="设置预售成功软顶 (BNB)"
-                description="认购期结束时若募集金额达到软顶，将自动开启加池开盘；未达到则发行失败并全额退款"
+                description="软顶固定为硬顶的 50%（例如硬顶 100 BNB 时软顶为 50 BNB）。认购结束时达到软顶即可加池开盘，未达软顶则全额退款"
                 unit="BNB"
                 allowDecimal
                 maxDecimals={4}

@@ -32,7 +32,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
-import { formatAddress, formatTokenSupply } from '@/lib/format'
+import { formatAddress, formatTokenSupply, formatNumber } from '@/lib/format'
 import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
 import { useLocale } from '@/lib/i18n'
@@ -473,7 +473,7 @@ export function TokenCard({
                   <span className="text-neutral-400">单钱包限购</span>
                   <span className="font-mono font-medium text-white">
                     {token.maxBuyPerWallet
-                      ? `${token.maxBuyPerWallet} 枚`
+                      ? `${formatNumber(token.maxBuyPerWallet)} 枚`
                       : '--'}
                   </span>
                 </div>

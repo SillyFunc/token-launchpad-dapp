@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useBalance } from 'wagmi'
 import { formatUnits } from 'viem'
 import { ArrowLeftRight, Coins, Info, Lock } from 'lucide-react'
@@ -34,14 +34,14 @@ export function CreatorBuySection({
 }: CreatorBuySectionProps) {
   const hasTokens = Number(creatorBuyTokens) > 0
   const hasBnb = Number(creatorBuyBnb) > 0
-  const initialMode = hasTokens && !hasBnb ? 'TOKEN' : 'BNB'
+  const initialMode = hasTokens ? 'TOKEN' : 'BNB'
 
   // 模式：'BNB' = 按注资 BNB 买入 (quote 模式)；'TOKEN' = 按目标代币数买入
   const [mode, setMode] = useState<'BNB' | 'TOKEN'>(initialMode)
 
   // 本地输入框文本
   const [inputValue, setInputValue] = useState<string>(() => {
-    if (hasTokens && !hasBnb) {
+    if (hasTokens) {
       return String(creatorBuyTokens)
     }
     if (hasBnb) {
@@ -49,6 +49,9 @@ export function CreatorBuySection({
     }
     return ''
   })
+
+  // 标记是否已完成来自服务端的异步初值回填（避免用户输入过程中被重复重置）
+  const hasSyncedInitialRef = useRef(hasTokens || hasBnb)
 
   // 钱包余额
   const { data: balanceData } = useBalance({
@@ -70,22 +73,28 @@ export function CreatorBuySection({
   const priceNum = Number(presaleTokenPrice) || 0
   const isPriceValid = priceNum > 0
 
-  // 同步外部表单初值（支持编辑模式回填）
+  // 同步外部表单初值（仅在首次从异步接口拉到数据时做一次性回填）
   useEffect(() => {
+    if (hasSyncedInitialRef.current) return
+
     const numTokens = Number(creatorBuyTokens) || 0
     const numBnb = Number(creatorBuyBnb) || 0
-    if (numTokens > 0 && numBnb <= 0) {
+
+    if (numTokens > 0) {
       setMode('TOKEN')
       setInputValue(String(creatorBuyTokens))
+      hasSyncedInitialRef.current = true
     } else if (numBnb > 0) {
       setMode('BNB')
       setInputValue(String(creatorBuyBnb))
+      hasSyncedInitialRef.current = true
     }
   }, [creatorBuyBnb, creatorBuyTokens])
 
   // 切换模式时的同步
   const handleToggleMode = () => {
     if (!isPriceValid) return
+    hasSyncedInitialRef.current = true
 
     if (mode === 'BNB') {
       // 切换到代币模式：根据当前输入的 BNB 换算预估代币数
@@ -121,6 +130,7 @@ export function CreatorBuySection({
   // 输入框变化处理
   const handleInputChange = (val: string) => {
     if (!isPriceValid) return
+    hasSyncedInitialRef.current = true
     // 仅允许合法正浮点数
     if (val !== '' && !/^\d*\.?\d*$/.test(val)) return
     setInputValue(val)

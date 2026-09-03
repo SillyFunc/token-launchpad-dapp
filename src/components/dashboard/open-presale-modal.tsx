@@ -26,7 +26,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
-import { formatAddress } from '@/lib/format'
+import { formatAddress, formatNumber } from '@/lib/format'
 import { useTokenGate } from '@/hooks/use-token-gate'
 import {
   DEFAULT_CHAIN_ID,
@@ -120,7 +120,7 @@ export function OpenPresaleModal({
     : '--'
 
   const maxBuyText = token.maxBuyPerWallet
-    ? `${token.maxBuyPerWallet} 枚`
+    ? `${formatNumber(token.maxBuyPerWallet)} 枚`
     : '--'
 
   const hardcapText = token.hardcap ? `${token.hardcap} BNB` : '不限'
