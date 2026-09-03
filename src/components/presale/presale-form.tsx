@@ -7,7 +7,6 @@ import {
   signMessage,
   writeContract,
   waitForTransactionReceipt,
-  switchChain,
 } from '@wagmi/core'
 import { parseEther } from 'viem'
 import { Loader2, Info } from 'lucide-react'
@@ -21,7 +20,6 @@ import { CreatorBuySection } from '@/components/presale/creator-buy-section'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
-  getTargetChainName,
 } from '@/config/network'
 import { CoordinatorFactoryAbi } from '@/contracts/abi'
 import { cn } from '@/lib/utils'
@@ -102,21 +100,10 @@ export function PresaleForm({
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
     },
     onSubmit: async ({ value }) => {
-      // 1. 钱包连接与网络校验
+      // 1. 钱包连接校验
       if (!address) {
         toast.error('请先连接钱包')
         return
-      }
-
-      if (config.state.chainId !== DEFAULT_CHAIN_ID) {
-        try {
-          await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
-        } catch {
-          toast.error(
-            `请在钱包中切换网络至 ${getTargetChainName(DEFAULT_CHAIN_ID)}`,
-          )
-          return
-        }
       }
 
       const hardcapWei = parseEther(value.hardcap || '0')

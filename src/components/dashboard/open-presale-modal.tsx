@@ -6,7 +6,6 @@ import {
   writeContract,
   readContract,
   waitForTransactionReceipt,
-  switchChain,
 } from '@wagmi/core'
 import {
   Coins,
@@ -102,18 +101,6 @@ export function OpenPresaleModal({
     if (!presaleAddress) {
       toast.error('未找到该代币的托管仓合约')
       return
-    }
-
-    // 确保钱包处于目标网络
-    if (config.state.chainId !== DEFAULT_CHAIN_ID) {
-      try {
-        await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
-      } catch {
-        toast.error(
-          `请在钱包中切换网络至 ${getTargetChainName(DEFAULT_CHAIN_ID)}`,
-        )
-        return
-      }
     }
 
     setIsExecuting(true)

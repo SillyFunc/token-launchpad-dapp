@@ -7,7 +7,6 @@ import { CoordinatorFactoryAbi, PresaleAbi } from '@/contracts/abi'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
-  getTargetChainName,
 } from '@/config/network'
 
 /** docs §4.1 presaleStatus 0-4 状态展示名 */
@@ -142,7 +141,6 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   const hasWallet = Boolean(userAddress)
   const isOnTestnet = chainId === DEFAULT_CHAIN_ID
-  const targetChainName = getTargetChainName(DEFAULT_CHAIN_ID)
 
   // 安全占位地址（防止 wagmi 在 enabled: false 时因参数不匹配而报错）
   const queryTokenAddress = validTokenAddress ?? zeroAddress
@@ -445,16 +443,10 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     return { allowed: true }
   })()
 
-  // 2. 发行代币上链 (canIssue): 必须未发行 + BSC 测试网 + 是创建者
+  // 2. 发行代币上链 (canIssue): 必须未发行 + 是创建者
   const canIssue: GateAction = (() => {
     if (!hasWallet) {
       return { allowed: false, reason: '请先连接钱包' }
-    }
-    if (!isOnTestnet) {
-      return {
-        allowed: false,
-        reason: `当前钱包未连接到 ${targetChainName}，请在钱包中切换网络。`,
-      }
     }
     if (options?.token && !isCreator) {
       return { allowed: false, reason: '仅代币创建者可执行发行' }
@@ -480,13 +472,6 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       return {
         allowed: false,
         reason: '请先连接钱包后再配置预售条款。',
-        isLoading: false,
-      }
-    }
-    if (!isOnTestnet) {
-      return {
-        allowed: false,
-        reason: `当前钱包未连接到 ${targetChainName}，请在钱包中切换网络。`,
         isLoading: false,
       }
     }
@@ -554,9 +539,6 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     if (!hasWallet) {
       return { allowed: false, reason: '请先连接钱包' }
     }
-    if (!isOnTestnet) {
-      return { allowed: false, reason: `请切换至 ${targetChainName}` }
-    }
     if (!isIssued) {
       return { allowed: false, reason: '代币尚未在链上发行' }
     }
@@ -577,7 +559,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   // 5. 开启预售 (canOpenPresale): 已配置 + 是创建者 + status=0
   const canOpenPresale: GateAction = (() => {
-    if (!hasWallet || !isOnTestnet || !isCreator || !presaleConfigured) {
+    if (!hasWallet || !isCreator || !presaleConfigured) {
       return { allowed: false }
     }
     return { allowed: presaleStatus === 0 }
@@ -585,7 +567,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   // 6. 结束预售 (canEndPresale): 状态处于 1 (认购中) + 必须达到软顶 + 是创建者
   const canEndPresale: GateAction = (() => {
-    if (!hasWallet || !isOnTestnet || !isCreator || !hasPresaleContract) {
+    if (!hasWallet || !isCreator || !hasPresaleContract) {
       return { allowed: false }
     }
     if (presaleStatus !== 1) {
@@ -602,7 +584,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
 
   // 7. 一键开盘加池 (canLaunch): 状态处于 2 (认购结束) + 是创建者
   const canLaunch: GateAction = (() => {
-    if (!hasWallet || !isOnTestnet || !isCreator || !hasPresaleContract) {
+    if (!hasWallet || !isCreator || !hasPresaleContract) {
       return { allowed: false }
     }
     return { allowed: presaleStatus === 2 }

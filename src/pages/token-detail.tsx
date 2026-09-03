@@ -5,7 +5,6 @@ import { useConnection, useConfig, useReadContract, useBalance } from 'wagmi'
 import {
   writeContract,
   waitForTransactionReceipt,
-  switchChain,
 } from '@wagmi/core'
 import {
   parseEther,
@@ -38,7 +37,6 @@ import { useTokenPrice } from '@/hooks/use-token-price'
 import {
   DEFAULT_CHAIN_ID,
   getExplorerUrl,
-  getTargetChainName,
 } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
@@ -70,8 +68,7 @@ export function TokenDetailPage() {
       ? (rawAddress.toLowerCase() as Hex)
       : undefined
 
-  const { address: userAddress, chainId } = useConnection()
-  const isOnTestnet = chainId === DEFAULT_CHAIN_ID
+  const { address: userAddress } = useConnection()
 
   const [activeTab, setActiveTab] = useState<'presale' | 'vesting' | 'chart'>(
     'presale',
@@ -221,15 +218,6 @@ export function TokenDetailPage() {
     if (!userAddress) {
       toast.error('请先连接钱包')
       return
-    }
-
-    if (!isOnTestnet) {
-      try {
-        await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
-      } catch {
-        toast.error(`请切换网络至 ${getTargetChainName(DEFAULT_CHAIN_ID)}`)
-        return
-      }
     }
 
     if (!presaleAddress) {

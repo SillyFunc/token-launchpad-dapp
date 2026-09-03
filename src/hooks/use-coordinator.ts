@@ -1,7 +1,6 @@
 import { useChainId, useConfig, useConnection, useReadContract } from 'wagmi'
 import {
   readContract,
-  switchChain,
   waitForTransactionReceipt,
   writeContract,
 } from '@wagmi/core'
@@ -158,15 +157,6 @@ export function useCreateToken() {
   const execute = async (
     params: CreateTokenParams,
   ): Promise<CreateTokenResult> => {
-    // 1. 确保钱包当前处于目标网络，若不是则自动发起网络切换
-    if (config.state.chainId !== DEFAULT_CHAIN_ID) {
-      try {
-        await switchChain(config, { chainId: DEFAULT_CHAIN_ID })
-      } catch (err) {
-        throw new CoordinatorError('WRONG_NETWORK', err)
-      }
-    }
-
     if (!coordinatorFactory) {
       throw new CoordinatorError('WRONG_NETWORK')
     }
