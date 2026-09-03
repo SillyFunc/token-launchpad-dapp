@@ -8,7 +8,6 @@ import {
   waitForTransactionReceipt,
   switchChain,
 } from '@wagmi/core'
-import { type Abi } from 'viem'
 import {
   Coins,
   Rocket,
@@ -35,11 +34,7 @@ import {
   getContractAddresses,
   getTargetChainName,
 } from '@/config/network'
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
-import PresaleAbiJson from '@/contracts/abi/Presale.json'
-
-const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
-const PresaleAbi = PresaleAbiJson as unknown as Abi
+import { CoordinatorFactoryAbi, PresaleAbi } from '@/contracts/abi'
 
 const KNOWN_ERRORS: Record<string, string> = {
   TokenNotRegistered: '代币未在本平台登记',

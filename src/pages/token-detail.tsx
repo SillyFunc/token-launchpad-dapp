@@ -12,9 +12,7 @@ import {
   formatEther,
   formatUnits,
   isAddress,
-  zeroAddress,
   type Hex,
-  type Abi,
 } from 'viem'
 import {
   Coins,
@@ -24,16 +22,12 @@ import {
   Globe,
   Send,
   Loader2,
-  Calendar,
-  Lock,
   Gift,
   AlertTriangle,
   TrendingUp,
-  Sparkles,
 } from 'lucide-react'
 
-import { getTokenByContractAddress, type TokenDetail } from '@/api/token'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { getTokenByContractAddress } from '@/api/token'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -47,13 +41,8 @@ import {
   getTargetChainName,
 } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
-import bnbIcon from '@/assets/bnb-icon.svg'
-import PresaleAbiJson from '@/contracts/abi/Presale.json'
-import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
+import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { cn } from '@/lib/utils'
-
-const PresaleAbi = PresaleAbiJson as unknown as Abi
-const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
 
 function TwitterIcon({ className }: { className?: string }) {
   return (
@@ -97,7 +86,6 @@ export function TokenDetailPage() {
   // ① 后端代币详情
   const {
     data: token,
-    isLoading: isTokenLoading,
   } = useQuery({
     queryKey: ['tokenDetail', tokenAddress],
     queryFn: () => getTokenByContractAddress(tokenAddress!),
@@ -110,18 +98,16 @@ export function TokenDetailPage() {
     presaleAddress,
     presaleEnabled,
     presaleStatus,
-    tokensClaimed,
     bnbAccumulated,
     tokensSubscribed,
     presaleShare,
     softCap,
     hardCap,
     isSoftCapReached,
-    isSoldOut,
-    isChainLoading,
   } = useTokenGate({
     tokenAddress,
     token,
+    watch: true,
   })
 
   // ③ 用户钱包 BNB 余额
@@ -517,7 +503,7 @@ export function TokenDetailPage() {
             <span className="text-[11px] text-neutral-400">总供应量</span>
             <span className="font-mono font-medium text-white">
               {totalSupply > 0n
-                ? `${formatNumber(Number(formatEther(totalSupply)))}`
+                ? `${formatNumber(Number(formatEther(totalSupply)), 'zh-TW')}`
                 : '--'}
             </span>
           </div>
@@ -662,6 +648,30 @@ export function TokenDetailPage() {
                   className="h-1.5 w-full bg-[#111213]"
                 />
               </div>
+
+              {/* 硬顶达成进度条 (若配置了硬顶) */}
+              {hardCapNum > 0 && (
+                <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-neutral-300">
+                      募资硬顶进度 (Hard Cap)
+                    </span>
+                    <span className="font-mono text-neutral-300">
+                      <strong className="text-white">
+                        {bnbAccumulatedNum.toFixed(4)}
+                      </strong>{' '}
+                      / {hardCapNum} BNB
+                      <span className="ml-1.5 font-bold text-[#FFA546]">
+                        ({hardCapPercent}%)
+                      </span>
+                    </span>
+                  </div>
+                  <Progress
+                    value={hardCapPercent}
+                    className="h-1.5 w-full bg-[#111213]"
+                  />
+                </div>
+              )}
 
               {/* 认购输入与余额区 */}
               <div className="flex flex-col gap-2 border-t border-white/5 pt-3">

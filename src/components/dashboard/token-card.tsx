@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useConnection, useConfig } from 'wagmi'
 import { signMessage, writeContract, waitForTransactionReceipt } from '@wagmi/core'
-import { type Abi, parseEther, formatEther } from 'viem'
+import { formatEther } from 'viem'
 import {
   Coins,
   Copy,
@@ -33,13 +33,57 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 import { formatAddress } from '@/lib/format'
-import PresaleAbiJson from '@/contracts/abi/Presale.json'
-import { useTokenGate } from '@/hooks/use-token-gate'
+import { PresaleAbi } from '@/contracts/abi'
+import {
+  useTokenGate,
+  resolveTokenStage,
+  type TokenCardStage,
+} from '@/hooks/use-token-gate'
 import { DEFAULT_CHAIN_ID, getExplorerUrl } from '@/config/network'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-const PresaleAbi = PresaleAbiJson as unknown as Abi
+const STAGE_CONFIG: Record<
+  TokenCardStage,
+  { label: string; className: string }
+> = {
+  draft: {
+    label: '未发行',
+    className: 'border-neutral-700 bg-neutral-800/80 text-neutral-400',
+  },
+  syncing: {
+    label: '同步中',
+    className: 'border-blue-800/40 bg-blue-950/30 text-blue-400',
+  },
+  claim_or_setup: {
+    label: '待配置预售',
+    className: 'border-amber-800/40 bg-amber-950/30 text-amber-400',
+  },
+  open_presale: {
+    label: '待开启预售',
+    className: 'border-orange-800/40 bg-orange-950/30 text-[#FFA546]',
+  },
+  presale_live: {
+    label: '预售认购中',
+    className: 'border-emerald-800/40 bg-emerald-950/30 text-emerald-400',
+  },
+  end_presale: {
+    label: '已达软顶',
+    className: 'border-green-800/40 bg-green-950/30 text-green-400',
+  },
+  launch: {
+    label: '待开盘上线',
+    className: 'border-purple-800/40 bg-purple-950/30 text-purple-400',
+  },
+  failed: {
+    label: '预售失败',
+    className: 'border-red-800/40 bg-red-950/30 text-red-400',
+  },
+  terminal: {
+    label: '已完结',
+    className: 'border-neutral-700 bg-neutral-800/60 text-neutral-400',
+  },
+}
 
 function TwitterIcon({ className }: { className?: string }) {
   return (
@@ -105,10 +149,6 @@ export function TokenCard({
     canLaunch,
   } = useTokenGate({ token })
 
-  const hasConfiguredPresale = Boolean(
-    token.presaleTokenPrice && Number(token.presaleTokenPrice) > 0,
-  )
-
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
   const tokensSubscribedNum = Number(formatEther(tokensSubscribed))
   const presaleShareNum =
@@ -145,6 +185,16 @@ export function TokenCard({
       : 0
 
   const tokenAddress = token.coinContractAddress || ''
+
+  // 单一状态机收敛生命周期，替代分散的多重布尔判断
+  const stage: TokenCardStage = resolveTokenStage({
+    isIssued,
+    isChainLoading,
+    tokensClaimed,
+    presaleConfigured,
+    presaleStatus,
+    isSoftCapReached,
+  })
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -315,6 +365,21 @@ export function TokenCard({
               </CardDescription>
             </div>
           </div>
+
+          <div className="shrink-0">
+            <span
+              className={cn(
+                'inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium',
+                STAGE_CONFIG[stage].className,
+              )}
+            >
+              {stage === 'terminal'
+                ? tokensClaimed
+                  ? '代币已领取'
+                  : '已上线交易'
+                : STAGE_CONFIG[stage].label}
+            </span>
+          </div>
         </CardHeader>
 
         <CardContent className="space-y-3 p-4">
@@ -384,7 +449,7 @@ export function TokenCard({
           </div>
 
           {/* 预售实时看板与多维进度条（严格仅在链上开启/配置了预售时展示） */}
-          {isIssued && presaleEnabled && (
+          {isIssued && (presaleEnabled || presaleConfigured) && (
             <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#17191b] p-3 text-xs">
               {/* 预售核心盘口参数（一行一条） */}
               <div className="flex flex-col divide-y divide-white/5 border-b border-white/5 pb-1 text-[11px]">
@@ -544,97 +609,93 @@ export function TokenCard({
         </CardContent>
       </div>
 
-      {/* 底部操作区（无条件直接挂载，由内部状态精准分流） */}
+      {/* 底部操作区：由单一状态机 stage 精准分流渲染 */}
       <CardFooter className="flex items-center justify-end gap-2 border-t border-[#2F3737] bg-[#16181a] p-3">
-        {/* ================= 1. 未发行草稿阶段 ================= */}
-        {!isIssued && (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="default"
-              onClick={() => {
-                if (!canEdit.allowed) {
-                  toast.error(canEdit.reason || '无法编辑代币资料')
-                  return
-                }
-                onEdit(token)
-              }}
-              disabled={!canEdit.allowed}
-            >
-              <Edit3 />
-              <span>编辑代币信息</span>
-            </Button>
-            <Button
-              type="button"
-              size="default"
-              onClick={() => {
-                if (!canIssue.allowed) {
-                  toast.error(canIssue.reason || '无法发行代币')
-                  return
-                }
-                onLaunch(token)
-              }}
-              disabled={!canIssue.allowed}
-              className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-            >
-              <Rocket />
-              <span>我要发行</span>
-            </Button>
-          </>
-        )}
+        {(() => {
+          switch (stage) {
+            case 'draft':
+              return (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    onClick={() => {
+                      if (!canEdit.allowed) {
+                        toast.error(canEdit.reason || '无法编辑代币资料')
+                        return
+                      }
+                      onEdit(token)
+                    }}
+                    disabled={!canEdit.allowed}
+                  >
+                    <Edit3 />
+                    <span>编辑代币信息</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="default"
+                    onClick={() => {
+                      if (!canIssue.allowed) {
+                        toast.error(canIssue.reason || '无法发行代币')
+                        return
+                      }
+                      onLaunch(token)
+                    }}
+                    disabled={!canIssue.allowed}
+                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                  >
+                    <Rocket />
+                    <span>我要发行</span>
+                  </Button>
+                </>
+              )
 
-        {/* ================= 2. 已发行代币阶段 ================= */}
-        {isIssued && (
-          <>
-            {/* 状态加载中 */}
-            {isChainLoading && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="default"
-                disabled
-                className="opacity-50"
-              >
-                <Loader2 className="animate-spin" />
-                <span>同步链上状态…</span>
-              </Button>
-            )}
-
-            {/* 阶段 2：已发行未配置（未领取 且 链上未 setupPresale）—— 二选一出口 */}
-            {!isChainLoading && !tokensClaimed && !presaleConfigured && (
-              <>
+            case 'syncing':
+              return (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="default"
-                  onClick={handleClaimTokens}
-                  disabled={isClaiming}
+                  disabled
+                  className="opacity-50"
                 >
-                  {isClaiming ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Gift />
-                  )}
-                  <span>{isClaiming ? '领取中…' : '领取代币'}</span>
+                  <Loader2 className="animate-spin" />
+                  <span>同步链上状态…</span>
                 </Button>
-                <Button
-                  type="button"
-                  size="default"
-                  onClick={handlePresaleClick}
-                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
-                >
-                  <Rocket />
-                  <span>设置预售</span>
-                </Button>
-              </>
-            )}
+              )
 
-            {/* 阶段 3：链上已设置预售（tokenConfigured=true），等待开闸认购 —— 只显示开启预售 */}
-            {!isChainLoading &&
-              !tokensClaimed &&
-              presaleConfigured &&
-              (presaleStatus === 0 || presaleStatus === undefined) && (
+            case 'claim_or_setup':
+              return (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    onClick={handleClaimTokens}
+                    disabled={isClaiming}
+                  >
+                    {isClaiming ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Gift />
+                    )}
+                    <span>{isClaiming ? '领取中…' : '领取代币'}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="default"
+                    onClick={handlePresaleClick}
+                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                  >
+                    <Rocket />
+                    <span>设置预售</span>
+                  </Button>
+                </>
+              )
+
+            case 'open_presale':
+              return (
                 <Button
                   type="button"
                   size="default"
@@ -644,13 +705,24 @@ export function TokenCard({
                   <Rocket />
                   <span>开启预售</span>
                 </Button>
-              )}
+              )
 
-            {/* 阶段 3.5：认购中阶段（presaleStatus === 1）—— 达到软顶后展示「结束预售」按钮 */}
-            {!isChainLoading &&
-              !tokensClaimed &&
-              presaleStatus === 1 &&
-              isSoftCapReached && (
+            case 'presale_live':
+              return (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="default"
+                  disabled
+                  className="opacity-75"
+                >
+                  <Clock className="size-4 text-[#FFA546]" />
+                  <span>预售认购中 (未达软顶)</span>
+                </Button>
+              )
+
+            case 'end_presale':
+              return (
                 <Button
                   type="button"
                   size="default"
@@ -665,12 +737,10 @@ export function TokenCard({
                   )}
                   <span>{isEnding ? '结束中…' : '结束预售'}</span>
                 </Button>
-              )}
+              )
 
-            {/* 阶段 4：认购结束，待开盘加池 */}
-            {!isChainLoading &&
-              !tokensClaimed &&
-              presaleStatus === 2 && (
+            case 'launch':
+              return (
                 <Button
                   type="button"
                   size="default"
@@ -687,21 +757,34 @@ export function TokenCard({
                     {isLaunching ? '开盘加池中…' : '一键开盘上线 (Launch)'}
                   </span>
                 </Button>
-              )}
+              )
 
-            {/* 阶段 5：已开盘上线 或 代币已被一键领取 */}
-            {!isChainLoading && (presaleStatus === 3 || tokensClaimed) && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="default"
-                disabled
-              >
-                <span>{tokensClaimed ? '代币已领取' : '已上线交易'}</span>
-              </Button>
-            )}
-          </>
-        )}
+            case 'failed':
+              return (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="default"
+                  disabled
+                >
+                  <span>预售失败</span>
+                </Button>
+              )
+
+            case 'terminal':
+            default:
+              return (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="default"
+                  disabled
+                >
+                  <span>{tokensClaimed ? '代币已领取' : '已上线交易'}</span>
+                </Button>
+              )
+          }
+        })()}
       </CardFooter>
     </Card>
   )

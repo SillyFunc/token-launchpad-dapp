@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useReadContract } from 'wagmi'
-import { type Abi } from 'viem'
 import {
   Flame,
   Search,
@@ -18,10 +17,8 @@ import { getPopularTokens, type TokenDetail } from '@/api/token'
 import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
 import { TokenRow } from '@/components/board/token-row'
-import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
+import { FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { DEFAULT_CHAIN_ID } from '@/config/network'
-
-const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
 
 export const Board = () => {
   const { locale } = useLocale()

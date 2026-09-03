@@ -234,19 +234,19 @@ function LaunchForm({ initialData, editId }: LaunchFormProps) {
 
       <div className="flex flex-col rounded border border-[#484b51] bg-[#131516]">
         {!isEditMode && (
-          <div className="flex items-center justify-between border-b border-b-[#484b51] p-4">
-            <div>
+          <div className="flex items-center justify-between gap-3 border-b border-b-[#484b51] p-4">
+            <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-white">保留您的代币 CA</div>
-              <div className="mt-1.5 text-xs text-neutral-500">
+              <div className="mt-1 text-xs text-neutral-500">
                 在发布前锁定您的代币合约的地址。
               </div>
             </div>
             <Link
               to="/launch"
-              className="flex items-center justify-center rounded border border-[#ffd98c] font-semibold text-xs py-2.5 px-6 text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black"
+              className="flex shrink-0 items-center justify-center whitespace-nowrap rounded border border-[#ffd98c] px-4 py-2 text-xs font-semibold text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black sm:px-6 sm:py-2.5"
             >
-              保留 CA
-              <ArrowRight className="size-3 ml-1.5" />
+              <span>保留 CA</span>
+              <ArrowRight className="ml-1.5 size-3 shrink-0" />
             </Link>
           </div>
         )}

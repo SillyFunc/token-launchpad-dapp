@@ -9,7 +9,7 @@ import {
   waitForTransactionReceipt,
   switchChain,
 } from '@wagmi/core'
-import { parseEther, type Abi } from 'viem'
+import { parseEther } from 'viem'
 import { Loader2, Info } from 'lucide-react'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
@@ -23,10 +23,8 @@ import {
   getContractAddresses,
   getTargetChainName,
 } from '@/config/network'
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import { CoordinatorFactoryAbi } from '@/contracts/abi'
 import { cn } from '@/lib/utils'
-
-const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
 const KNOWN_ERRORS: Record<string, string> = {
   TokenNotRegistered: '代币未在本平台登记',

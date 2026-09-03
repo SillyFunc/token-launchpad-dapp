@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection, useReadContract } from 'wagmi'
-import { type Abi } from 'viem'
 import { ConnectKitButton } from 'connectkit'
 import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
@@ -11,13 +10,11 @@ import { Button } from '@/components/ui/button'
 import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
 import { OpenPresaleModal } from '@/components/dashboard/open-presale-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
-import FlapTaxTokenV3AbiJson from '@/contracts/abi/FlapTaxTokenV3.json'
+import { FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { formatTokenSupply } from '@/lib/format'
 import { useLocale } from '@/lib/i18n'
 import { DEFAULT_CHAIN_ID } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
-
-const FlapTaxTokenV3Abi = FlapTaxTokenV3AbiJson as unknown as Abi
 
 export const Dashboard = () => {
   const { address } = useConnection()

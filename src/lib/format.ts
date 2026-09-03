@@ -43,7 +43,7 @@ export function formatAddress(addr?: string | null): string {
 /** 美元金额（紧凑格式，跟随语言环境） */
 export function formatUsd(
   value: number | string | null | undefined,
-  locale: Locale,
+  locale: Locale = 'zh-TW',
 ): string {
   const num = toNumber(value)
   if (num === null || num === 0) return '--'
@@ -53,7 +53,7 @@ export function formatUsd(
 /** 通用数量（紧凑格式，跟随语言环境） */
 export function formatNumber(
   value: number | string | null | undefined,
-  locale: Locale,
+  locale: Locale = 'zh-TW',
 ): string {
   const num = toNumber(value)
   if (num === null || num === 0) return '--'

@@ -9,17 +9,14 @@ import {
   bytesToHex,
   decodeEventLog,
   formatEther,
-  type Abi,
   type Hex,
 } from 'viem'
 
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
+import { CoordinatorFactoryAbi } from '@/contracts/abi'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
 } from '@/config/network'
-
-const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
 
 export interface CreateTokenParams {
   name: string

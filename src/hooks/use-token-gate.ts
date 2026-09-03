@@ -1,18 +1,14 @@
 import { useConnection, useReadContract, useWatchContractEvent } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
-import { isAddress, zeroAddress, parseEther, type Abi, type Hex } from 'viem'
+import { isAddress, zeroAddress, parseEther, type Hex } from 'viem'
 
 import type { TokenDetail } from '@/api/token'
-import CoordinatorFactoryAbiJson from '@/contracts/abi/CoordinatorFactory.json'
-import PresaleAbiJson from '@/contracts/abi/Presale.json'
+import { CoordinatorFactoryAbi, PresaleAbi } from '@/contracts/abi'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
   getTargetChainName,
 } from '@/config/network'
-
-const CoordinatorFactoryAbi = CoordinatorFactoryAbiJson as unknown as Abi
-const PresaleAbi = PresaleAbiJson as unknown as Abi
 
 /** docs §4.1 presaleStatus 0-4 状态展示名 */
 export const PRESALE_STATUS_LABEL: Record<number, string> = {
@@ -21,6 +17,47 @@ export const PRESALE_STATUS_LABEL: Record<number, string> = {
   2: '认购结束（待开盘）',
   3: '已开盘',
   4: '发行失败',
+}
+
+/**
+ * 代币卡片的完整生命周期阶段（在 useTokenGate 链上态之上聚合而成）。
+ * 顺序即优先级：草稿 → 同步中 → 二选一出口 → 预售各阶段 → 终态。
+ */
+export type TokenCardStage =
+  | 'draft' // 未发行草稿
+  | 'syncing' // 链上状态同步中
+  | 'claim_or_setup' // 已发行未配置：领取 / 设置预售
+  | 'open_presale' // 已配置待开启（status 0）
+  | 'presale_live' // 认购中（status 1，未达软顶）
+  | 'end_presale' // 认购中且已达软顶（status 1）
+  | 'launch' // 认购结束待开盘（status 2）
+  | 'failed' // 发行失败（status 4）
+  | 'terminal' // 已开盘（status 3）或已领取
+
+export function resolveTokenStage(g: {
+  isIssued: boolean
+  isChainLoading: boolean
+  tokensClaimed: boolean
+  presaleConfigured: boolean
+  presaleStatus?: number
+  isSoftCapReached: boolean
+}): TokenCardStage {
+  if (!g.isIssued) return 'draft'
+  if (g.isChainLoading) return 'syncing'
+  if (!g.tokensClaimed && !g.presaleConfigured) return 'claim_or_setup'
+  if (
+    !g.tokensClaimed &&
+    g.presaleConfigured &&
+    (g.presaleStatus === 0 || g.presaleStatus === undefined)
+  ) {
+    return 'open_presale'
+  }
+  if (!g.tokensClaimed && g.presaleStatus === 1) {
+    return g.isSoftCapReached ? 'end_presale' : 'presale_live'
+  }
+  if (!g.tokensClaimed && g.presaleStatus === 2) return 'launch'
+  if (!g.tokensClaimed && g.presaleStatus === 4) return 'failed'
+  return 'terminal'
 }
 
 export interface GateAction {
@@ -37,6 +74,8 @@ export interface UseTokenGateOptions {
   token?: TokenDetail | null
   /** 显式指定的创建者地址（可选） */
   creatorAddress?: string
+  /** 是否开启链上事件实时监听（默认 false，建议仅在详情页开启，避免列表卡片开启过多监听） */
+  watch?: boolean
 }
 
 export interface TokenGateResult {
@@ -252,15 +291,17 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     query: { enabled: hasPresaleContract, staleTime: 60_000 },
   })
 
-  // ================= 链上事件实时监听（即时刷新 UI） =================
+  // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
   useWatchContractEvent({
     address: presaleAddress,
     abi: PresaleAbi,
     chainId: DEFAULT_CHAIN_ID,
-    enabled: hasPresaleContract,
+    enabled: Boolean(options?.watch) && hasPresaleContract,
     onLogs: () => {
-      void queryClient.invalidateQueries()
+      void queryClient.invalidateQueries({
+        queryKey: ['readContract', { address: presaleAddress }],
+      })
       void refetchLaunchStatus()
     },
   })
