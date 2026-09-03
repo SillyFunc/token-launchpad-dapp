@@ -1,16 +1,11 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
 import { useConnection, useConfig } from 'wagmi'
 import { type Hex, zeroAddress } from 'viem'
 import {
   Coins,
   Rocket,
-  ExternalLink,
-  Copy,
-  Check,
   Loader2,
   AlertTriangle,
-  CheckCircle2,
 } from 'lucide-react'
 
 import { parseTxHash, type TokenDetail } from '@/api/token'
@@ -35,7 +30,6 @@ import { formatAddress } from '@/lib/format'
 import { useTokenGate } from '@/hooks/use-token-gate'
 import {
   DEFAULT_CHAIN_ID,
-  getExplorerUrl,
   getTargetChainName,
 } from '@/config/network'
 
@@ -76,25 +70,13 @@ export function IssueTokenModal({
   onClose,
   onSuccess,
 }: IssueTokenModalProps) {
-  const navigate = useNavigate()
   const { address } = useConnection()
   const config = useConfig()
   const { formattedFee } = useCreationFee()
   const { execute: createToken } = useCreateToken()
   const { canIssue } = useTokenGate({ token })
 
-  const [copied, setCopied] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
-  const [issuedTokenAddress, setIssuedTokenAddress] = useState<Hex | null>(null)
-
-  const isIssued = issuedTokenAddress !== null
-
-  const handleCopy = (text: string) => {
-    void navigator.clipboard.writeText(text)
-    setCopied(true)
-    toast.success('已复制到剪贴板')
-    setTimeout(() => setCopied(false), 2000)
-  }
 
   const handleExecute = async () => {
     if (!canIssue.allowed) {
@@ -134,9 +116,9 @@ export function IssueTokenModal({
         }
       }
 
-      setIssuedTokenAddress(result.tokenAddress)
-      toast.success('代币已成功发行到区块链！')
+      toast.success('代币发行成功！')
       onSuccess(result.tokenAddress)
+      onClose()
     } catch (err: unknown) {
       toast.error(toErrorMessage(err), '发行失败')
     } finally {
@@ -238,109 +220,46 @@ export function IssueTokenModal({
             </div>
           </div>
 
-          {!isIssued && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
-              <span>
-                链上发行后合约参数将写入区块链且不可更改，请确认钱包留有足够的
-                BNB 支付 Gas 费。
-              </span>
-            </div>
-          )}
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
+            <span>
+              链上发行后合约参数将写入区块链且不可更改，请确认钱包留有足够的
+              BNB 支付 Gas 费。
+            </span>
+          </div>
 
-          {isIssued && issuedTokenAddress && (
-            <div className="flex flex-col gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-4 text-xs text-green-400">
-              <div className="flex items-center gap-2 font-bold text-sm text-green-300">
-                <CheckCircle2 className="size-4" />
-                <span>代币已成功发行到区块链！</span>
-              </div>
-              <div className="mt-1 flex items-center justify-between rounded bg-black/40 px-2.5 py-1.5 text-neutral-200">
-                <span className="text-neutral-400">代币 CA：</span>
-                <div className="flex items-center gap-1.5 font-mono">
-                  <span>{formatAddress(issuedTokenAddress)}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(issuedTokenAddress)}
-                    className="cursor-pointer text-neutral-400 hover:text-white"
-                  >
-                    {copied ? (
-                      <Check className="size-3.5 text-green-400" />
-                    ) : (
-                      <Copy className="size-3.5" />
-                    )}
-                  </button>
-                  <a
-                    href={getExplorerUrl(issuedTokenAddress, 'address')}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-neutral-400 hover:text-white"
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <DialogFooter className="flex flex-row items-center justify-end gap-2 border-t border-[#2F3737] px-5 py-3">
-          {isIssued ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onClose}
-                className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
-              >
-                完成关闭
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  onClose()
-                  navigate(`/presale?address=${issuedTokenAddress}`)
-                }}
-                className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000]"
-              >
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isExecuting}
+            onClick={onClose}
+            className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
+          >
+            取消
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={isExecuting || !canIssue.allowed}
+            onClick={handleExecute}
+            className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                <span>处理中…</span>
+              </>
+            ) : (
+              <>
                 <Rocket className="size-3.5" />
-                立即前往预售
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isExecuting}
-                onClick={onClose}
-                className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
-              >
-                取消
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={isExecuting || !canIssue.allowed}
-                onClick={handleExecute}
-                className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-              >
-                {isExecuting ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    <span>处理中…</span>
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="size-3.5" />
-                    <span>确认并上链发行</span>
-                  </>
-                )}
-              </Button>
-            </>
-          )}
+                <span>确认并上链发行</span>
+              </>
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
