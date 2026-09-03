@@ -15,6 +15,7 @@ export interface CreatorBuySectionProps {
   creatorBuyTokens: string
   onChangeBnb: (val: string) => void
   onChangeTokens: (val: string) => void
+  maxBuyBnb?: number
   error?: string
 }
 
@@ -30,6 +31,7 @@ export function CreatorBuySection({
   creatorBuyTokens,
   onChangeBnb,
   onChangeTokens,
+  maxBuyBnb,
   error,
 }: CreatorBuySectionProps) {
   const hasTokens = Number(creatorBuyTokens) > 0
@@ -155,11 +157,13 @@ export function CreatorBuySection({
     }
   }
 
-  // 快捷百分比（基于钱包 BNB 余额，扣除 0.005 BNB gas 预留）
+  // 快捷百分比（基于钱包 BNB 余额与单钱包限额两者的较小值，扣除 0.005 BNB gas 预留）
   const handlePercentClick = (percent: number) => {
     if (!isPriceValid) return
     const usableBnb = Math.max(0, rawBalanceNum - 0.005)
-    const targetBnb = (usableBnb * percent) / 100
+    const baseBnb =
+      maxBuyBnb && maxBuyBnb > 0 ? Math.min(usableBnb, maxBuyBnb) : usableBnb
+    const targetBnb = (baseBnb * percent) / 100
 
     if (mode === 'BNB') {
       const bnbStr = targetBnb > 0 ? formatCleanNumber(targetBnb, 4) : '0'
@@ -194,6 +198,20 @@ export function CreatorBuySection({
         ? '需先输入预售价'
         : '0'
 
+  // 计算当前注资所需的实际 BNB 数
+  const currentBnbCost =
+    mode === 'BNB' ? inputNum : priceNum > 0 ? inputNum * priceNum : 0
+
+  // 内部校验错误（余额不足或超过单钱包购买上限）
+  let validationError = error
+  if (!validationError && currentBnbCost > 0) {
+    if (maxBuyBnb && maxBuyBnb > 0 && currentBnbCost > maxBuyBnb + 0.00001) {
+      validationError = `注资额不能超过购买上限 (${maxBuyBnb} BNB)`
+    } else if (rawBalanceNum > 0 && currentBnbCost > rawBalanceNum) {
+      validationError = `注资额超出钱包余额 (${formattedBalance} BNB)`
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 text-white">
       {/* 模块标题与说明 */}
@@ -209,12 +227,20 @@ export function CreatorBuySection({
         </p>
       </div>
 
-      {/* 余额行 */}
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-neutral-400">钱包可用余额：</span>
-        <span className="font-mono font-medium text-white">
-          {formattedBalance} BNB
-        </span>
+      {/* 余额与限额信息 */}
+      <div className="flex flex-col gap-1.5 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="text-neutral-400">钱包余额：</span>
+          <span className="font-mono font-medium text-white">
+            {formattedBalance} BNB
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-neutral-400">购买上限：</span>
+          <span className="font-mono font-medium text-[#FFA546]">
+            {maxBuyBnb && maxBuyBnb > 0 ? `${maxBuyBnb} BNB` : '--'}
+          </span>
+        </div>
       </div>
 
       {/* 主输入框与右侧切换按钮（Figma 布局，未填预售价时锁定） */}
@@ -223,7 +249,7 @@ export function CreatorBuySection({
           className={cn(
             'flex h-11 items-center justify-between border border-[#484b51] bg-[#141517] px-3 transition-colors',
             isPriceValid ? 'focus-within:border-[#FE810B]' : 'opacity-50 cursor-not-allowed bg-[#181a1d]',
-            error && 'border-red-500',
+            validationError && 'border-red-500',
           )}
         >
           {/* 左侧数值输入 */}
@@ -270,7 +296,9 @@ export function CreatorBuySection({
             <ArrowLeftRight className="ml-0.5 size-3 text-[#FFA546]" />
           </button>
         </div>
-        {error && <span className="text-[11px] text-red-500">{error}</span>}
+        {validationError && (
+          <span className="text-[11px] text-red-500">{validationError}</span>
+        )}
       </div>
 
       {/* 快捷百分比按钮组 (25% / 50% / 75% / 100%) */}
