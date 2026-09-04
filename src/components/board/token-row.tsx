@@ -1,40 +1,44 @@
 import { useNavigate } from 'react-router'
-import { useReadContract } from 'wagmi'
+import { formatUnits } from 'viem'
 import { Coins } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
 import { formatNumber } from '@/lib/format'
 import type { Locale } from '@/lib/i18n'
-import { useTokenPrice } from '@/hooks/use-token-price'
-import { FlapTaxTokenV3Abi } from '@/contracts/abi'
-import { DEFAULT_CHAIN_ID } from '@/config/network'
+import type { BoardTokenPricing } from '@/hooks/use-board-pricing'
 
 export interface TokenRowProps {
   token: TokenDetail
   locale: Locale
   bnbUsd: number
+  pricing?: BoardTokenPricing
 }
 
-export function TokenRow({ token, locale, bnbUsd }: TokenRowProps) {
+export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
   const navigate = useNavigate()
   const tokenAddress = token.coinContractAddress || ''
 
-  const { data: totalSupplyData } = useReadContract({
-    address: tokenAddress ? (tokenAddress as `0x${string}`) : undefined,
-    abi: FlapTaxTokenV3Abi,
-    functionName: 'totalSupply',
-    chainId: DEFAULT_CHAIN_ID,
-    query: {
-      enabled: Boolean(tokenAddress),
-      staleTime: Infinity,
-    },
-  })
+  const {
+    totalSupply,
+    stage = 'not_launched',
+    priceBNB = null,
+    bnbReserve = null,
+    changePercent = null,
+  } = pricing ?? {}
 
-  const { priceUSD, mcapUSD, tvlUSD, stage, changePercent } = useTokenPrice(
-    tokenAddress as `0x${string}`,
-    totalSupplyData as bigint | undefined,
-    bnbUsd,
-  )
+  const priceUSD =
+    priceBNB !== null && bnbUsd > 0 ? priceBNB * bnbUsd : null
+  const mcapUSD =
+    priceUSD !== null && totalSupply
+      ? priceUSD * Number(formatUnits(totalSupply, 18))
+      : null
+  const tvlWarning =
+    stage === 'live' &&
+    bnbReserve !== null &&
+    bnbUsd > 0 &&
+    Number(formatUnits(bnbReserve, 18)) * 2 * bnbUsd < 200
+      ? '低流动性'
+      : null
 
   const priceText =
     priceUSD !== null
@@ -46,10 +50,6 @@ export function TokenRow({ token, locale, bnbUsd }: TokenRowProps) {
       : stage === 'not_launched'
         ? '未开盘'
         : '--'
-  const tvlWarning =
-    tvlUSD !== null && tvlUSD < 200
-      ? '低流动性'
-      : null
 
   const isPositive = changePercent !== null && changePercent >= 0
   const changeText =

@@ -219,3 +219,25 @@ export function calcMcapUsd(priceBNB: number, bnbUsd: number, totalSupply: bigin
 export function calcTvlUsd(bnbReserve: bigint, bnbUsd: number): number {
   return Number(formatUnits(bnbReserve, 18)) * 2 * bnbUsd
 }
+
+/* -------------------------------------------------------------------------- */
+/* 涨幅基准 — 预售发行价优先，否则记录首次见到的 live 价格（localStorage）       */
+/* -------------------------------------------------------------------------- */
+
+export function readStoredBaseline(tokenAddr: string): number | null {
+  try {
+    const raw = localStorage.getItem(`launchpad:baseline:${tokenAddr.toLowerCase()}`)
+    const num = Number(raw)
+    return raw !== null && Number.isFinite(num) && num > 0 ? num : null
+  } catch {
+    return null
+  }
+}
+
+export function storeBaseline(tokenAddr: string, price: number) {
+  try {
+    localStorage.setItem(`launchpad:baseline:${tokenAddr.toLowerCase()}`, String(price))
+  } catch {
+    // localStorage 不可用时忽略
+  }
+}

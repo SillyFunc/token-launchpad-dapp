@@ -16,6 +16,7 @@ import { getPopularTokens, type TokenDetail } from '@/api/token'
 import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
 import { TokenRow } from '@/components/board/token-row'
+import { useBoardPricing } from '@/hooks/use-board-pricing'
 
 export const Board = () => {
   const { locale } = useLocale()
@@ -54,6 +55,9 @@ export const Board = () => {
   const tokenList: TokenDetail[] = Array.isArray(tokens?.list)
     ? tokens.list
     : []
+
+  // 整页代币的定价由 3 次批量 multicall 提供，TokenRow 为纯展示组件
+  const pricingMap = useBoardPricing(tokenList)
 
   const filterOptions = ['热门', '最新', '市值榜', '涨幅榜']
 
@@ -231,14 +235,18 @@ export const Board = () => {
               <span>{searchKeyword ? '暂无匹配代币' : '暂无代币数据'}</span>
             </div>
           ) : (
-            displayedTokens.map((token) => (
-              <TokenRow
-                key={token.id}
-                token={token}
-                locale={locale}
-                bnbUsd={bnbUsd}
-              />
-            ))
+            displayedTokens.map((token) => {
+              const key = String(token.coinContractAddress || '').toLowerCase()
+              return (
+                <TokenRow
+                  key={token.id}
+                  token={token}
+                  locale={locale}
+                  bnbUsd={bnbUsd}
+                  pricing={pricingMap[key]}
+                />
+              )
+            })
           )}
         </div>
       </div>
