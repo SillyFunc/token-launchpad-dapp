@@ -221,20 +221,42 @@ export function useBoardPricing(
     // 预售期：lp 未添加，且 getLaunchStatus 为 enabled 且 status < 3 时用发行价展示
     for (const s of pairStates) {
       if (s.pair) continue
+      const claimed = s.launchStatus?.[5] === true
       const launchEnabled = s.launchStatus?.[0] === true
-      const launchStep = s.launchStatus ? Number(s.launchStatus[1]) : Infinity
-      if (launchEnabled && launchStep < 3 && s.presalePrice) {
+      const launchStep = s.launchStatus ? Number(s.launchStatus[1]) : -1
+
+      // 已领取（纯发币领取完成，或开盘后仓空）→ 已开盘（等待创建者自建池）
+      if (claimed) {
+        map[s.key] = {
+          baselinePriceBNB: null,
+          pricing: {
+            totalSupply: s.totalSupply,
+            stage: 'live',
+            priceBNB: null,
+            bnbReserve: null,
+            changePercent: null,
+          },
+        }
+        continue
+      }
+
+      // 已开启预售（认购中 / 认购结束待开盘）→ 预售中
+      if (launchEnabled && (launchStep === 1 || launchStep === 2)) {
         map[s.key] = {
           baselinePriceBNB: null,
           pricing: {
             totalSupply: s.totalSupply,
             stage: 'presale',
-            priceBNB: Number(formatUnits(s.presalePrice, 18)),
+            priceBNB: s.presalePrice
+              ? Number(formatUnits(s.presalePrice, 18))
+              : null,
             bnbReserve: null,
             changePercent: null,
           },
         }
       }
+
+      // 其余（未开启预售 / 配置未开启 / 预售失败）保持未开盘
     }
 
     // 已开盘：pair 储备计价，预售发行价作为涨幅基准

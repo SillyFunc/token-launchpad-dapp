@@ -122,7 +122,7 @@ export const Prelaunch = () => {
           </Button>
         </SectionWrapper>
         <SectionWrapper title="锁定 CA 地址" prefix={2}>
-          <div className="text-[#f68f15] border-none bg-[rgba(246,143,21,0.1)] flex items-start sm:items-center gap-2 p-3">
+          <div className="text-[#f68f15] border-none bg-[rgba(246,143,21,0.1)] flex items-start items-center gap-2 p-3">
             <Info className="text-[#f68f15] size-4" />
             <p className="text-[#f68f15] text-xs">
               预留费不予退还；锁定后地址永久归属当前钱包，他人无法占用，也不会过期。

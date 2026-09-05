@@ -23,6 +23,9 @@ import {
   Gift,
   AlertTriangle,
   TrendingUp,
+  Loader2,
+  XCircle,
+  Clock,
 } from 'lucide-react'
 
 import { getTokenByContractAddress } from '@/api/token'
@@ -30,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toast'
 import {
   formatAddress,
@@ -85,11 +89,14 @@ export function TokenDetailPage() {
   // 认购输入金额 (BNB)
   const [subscribeAmount, setSubscribeAmount] = useState<string>('')
   const [isSubscribing, setIsSubscribing] = useState(false)
+  const [isRefunding, setIsRefunding] = useState(false)
   const [isClaimingVesting, setIsClaimingVesting] = useState(false)
 
   // ① 后端代币详情
   const {
     data: token,
+    isLoading: isTokenLoading,
+    isError: isTokenError,
   } = useQuery({
     queryKey: ['tokenDetail', tokenAddress],
     queryFn: () => getTokenByContractAddress(tokenAddress!),
@@ -98,6 +105,7 @@ export function TokenDetailPage() {
 
   // ② 代币门禁与链上状态 (WebSocket 实时推送)
   const {
+    isChainLoading,
     isIssued,
     presaleAddress,
     presaleEnabled,
@@ -112,6 +120,7 @@ export function TokenDetailPage() {
     vestingRate,
     onchainPresalePrice,
     onchainMaxBuy,
+    presaleEndTime,
   } = useTokenGate({
     tokenAddress,
     token,
@@ -158,6 +167,23 @@ export function TokenDetailPage() {
     (userVestingData as
       | readonly [bigint, bigint, bigint, bigint]
       | undefined) ?? []
+
+  // 用户认购支付记录（预售失败退款用）
+  const {
+    data: userContributionData,
+    refetch: refetchContribution,
+  } = useReadContract({
+    address: presaleAddress,
+    abi: PresaleAbi,
+    functionName: 'contributions',
+    args: userAddress ? [userAddress] : undefined,
+    chainId: DEFAULT_CHAIN_ID,
+    query: {
+      enabled: Boolean(presaleAddress && userAddress),
+      staleTime: 5_000,
+    },
+  })
+  const userContribution = (userContributionData as bigint | undefined) ?? 0n
 
   // ⑥ 价格行情数据 (WebSocket 实时订阅)
   const tokenPriceData = useTokenPrice(
@@ -267,6 +293,12 @@ export function TokenDetailPage() {
     remainingMaxBnbQuota !== null &&
     inputBnbNum > remainingMaxBnbQuota + 0.0001
 
+  // 认购窗口已过但链上仍是认购中（status 1）：任何人可触发 endPresale
+  const isPresaleWindowOver =
+    presaleStatus === 1 &&
+    presaleEndTime !== undefined &&
+    Date.now() / 1000 >= Number(presaleEndTime)
+
   // 快捷百分比填入（基于综合可用上限，去除末尾冗余的 0）
   const handlePercentClick = (percent: number) => {
     const target = (effectiveMaxBnb * percent) / 100
@@ -355,6 +387,72 @@ export function TokenDetailPage() {
     }
   }
 
+  // 预售失败退款：按原路退回认购时支付的 BNB
+  const handleRefund = async () => {
+    if (!presaleAddress) return
+
+    setIsRefunding(true)
+    try {
+      const hash = await writeContract(config, {
+        address: presaleAddress,
+        abi: PresaleAbi,
+        functionName: 'refund',
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      await waitForTransactionReceipt(config, {
+        hash,
+        chainId: DEFAULT_CHAIN_ID,
+      })
+
+      queryClient.invalidateQueries()
+      void refetchVesting()
+      void refetchContribution()
+      toast.success(
+        `退款成功！${formatDecimalText(Number(formatEther(userContribution)))} BNB 已原路退回`,
+      )
+    } catch (err: unknown) {
+      toast.error(
+        parseContractError(err, '退款失败，请稍后重试', {
+          NothingToClaim: '无可退还的认购资金（可能已退款）',
+        }),
+        '退款失败',
+      )
+    } finally {
+      setIsRefunding(false)
+    }
+  }
+
+  // 认购到期后触发结束预售（合约允许任何人调用，无需创建者）
+  const [isEndingPresale, setIsEndingPresale] = useState(false)
+  const handleTriggerEndPresale = async () => {
+    if (!presaleAddress) return
+
+    setIsEndingPresale(true)
+    try {
+      const hash = await writeContract(config, {
+        address: presaleAddress,
+        abi: PresaleAbi,
+        functionName: 'endPresale',
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      await waitForTransactionReceipt(config, {
+        hash,
+        chainId: DEFAULT_CHAIN_ID,
+      })
+
+      queryClient.invalidateQueries()
+      toast.success(
+        isSoftCapReached
+          ? '预售已结束！软顶已达成，进入待开盘阶段（创建者 72 小时内加池上线）'
+          : '预售已结束！未达软顶，已转入退款流程，认购者可申请退款',
+      )
+    } catch (err: unknown) {
+      toast.error(parseContractError(err, '结束失败，请稍后重试'), '结束失败')
+    } finally {
+      setIsEndingPresale(false)
+    }
+  }
+
   // ⑧ 提取解锁代币
   const handleClaimVesting = async () => {
     if (!presaleAddress) return
@@ -406,6 +504,46 @@ export function TokenDetailPage() {
     )
   }
 
+  // 中心化（后端）与去中心化（链上）数据均在加载中 → 全屏 Loading，
+  // 避免先渲染默认状态 UI 再跳变
+  const isPageLoading =
+    !isTokenError &&
+    (isTokenLoading || (Boolean(tokenAddress) && isChainLoading))
+
+  if (isPageLoading) {
+    return (
+      <div
+        role="status"
+        aria-label="正在加载代币信息"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-2.5 bg-background"
+      >
+        <Spinner className="size-8 text-[#FFA546]" />
+        <span className="text-xs text-neutral-300">正在获取代币信息…</span>
+      </div>
+    )
+  }
+
+  // 后端查询失败或未查到代币
+  if (isTokenError || !token) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-col items-center justify-center p-12 text-center text-white">
+        <AlertTriangle className="mb-3 size-10 text-amber-400" />
+        <h2 className="text-base font-bold">未找到代币信息</h2>
+        <p className="mt-1 text-xs text-neutral-400">
+          未获取到该代币的中心化或链上数据，请确认地址是否正确。
+        </p>
+        <Button
+          variant="outline"
+          size="default"
+          onClick={() => navigate('/board')}
+          className="mt-4"
+        >
+          返回行情榜
+        </Button>
+      </div>
+    )
+  }
+
   // 是否开启了预售（严格以链上 presaleEnabled 为准）
   const hasPresale = Boolean(isIssued && presaleEnabled)
 
@@ -429,31 +567,6 @@ export function TokenDetailPage() {
           </button>
           <span className="text-lg font-bold tracking-wide text-white">
             {hasPresale ? '代币预售详情' : '代币详情'}
-          </span>
-        </div>
-
-        {/* 状态徽标 */}
-        <div className="flex items-center gap-1.5 rounded-full bg-[#1c1f21] px-3 py-1 text-xs border border-[#2F3737]">
-          <span
-            className={cn(
-              'size-2 rounded-full animate-pulse',
-              hasPresale
-                ? presaleStatus === 1
-                  ? 'bg-green-400'
-                  : presaleStatus === 2
-                    ? 'bg-amber-400'
-                    : 'bg-blue-400'
-                : 'bg-green-400',
-            )}
-          />
-          <span className="font-semibold text-neutral-200">
-            {hasPresale
-              ? presaleStatus === 1
-                ? '认购中'
-                : presaleStatus === 2
-                  ? '认购结束 (待开盘)'
-                  : '已上线交易'
-              : 'DEX 现货交易'}
           </span>
         </div>
       </div>
@@ -554,19 +667,19 @@ export function TokenDetailPage() {
         {/* 4 栏数据指标 (Figma #6501:6188) */}
         <div className="mt-4 grid grid-cols-4 divide-x divide-white/10 border-t border-white/5 pt-3 text-center text-xs">
           <div className="flex flex-col gap-0.5 px-1">
-            <span className="text-[11px] text-neutral-400">代币名称</span>
+            <span className="text-xs text-neutral-400">代币名称</span>
             <span className="truncate font-medium text-white">
               {token?.name || '--'}
             </span>
           </div>
           <div className="flex flex-col gap-0.5 px-1">
-            <span className="text-[11px] text-neutral-400">代币符号</span>
+            <span className="text-xs text-neutral-400">代币符号</span>
             <span className="truncate font-medium text-white">
               &#36;{token?.symbol || '--'}
             </span>
           </div>
           <div className="flex flex-col gap-0.5 px-1">
-            <span className="text-[11px] text-neutral-400">总供应量</span>
+            <span className="text-xs text-neutral-400">总供应量</span>
             <span className="font-mono font-medium text-white">
               {totalSupply > 0n
                 ? `${formatNumber(Number(formatEther(totalSupply)), 'zh-TW')}`
@@ -574,7 +687,7 @@ export function TokenDetailPage() {
             </span>
           </div>
           <div className="flex flex-col gap-0.5 px-1">
-            <span className="text-[11px] text-neutral-400">买/卖税率</span>
+            <span className="text-xs text-neutral-400">买/卖税率</span>
             <span className="font-mono font-medium text-white">
               {token?.buyTax ?? 0}% / {token?.sellTax ?? 0}%
             </span>
@@ -688,6 +801,64 @@ export function TokenDetailPage() {
 
             {/* 下部：参与预售交互卡片 (Figma #6501:6230) */}
             <div className="flex flex-col gap-4 border border-[#2F3737] bg-[#141517] p-4 shadow-xl">
+              {presaleStatus === 4 ? (
+                <>
+                  {/* 预售失败提示 */}
+                  <div className="flex items-start gap-2.5 rounded border border-red-500/25 bg-red-500/10 p-3">
+                    <XCircle className="mt-0.5 size-5 shrink-0 text-red-400" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-bold text-red-400">
+                        预售失败
+                      </span>
+                      <span className="text-xs leading-relaxed text-neutral-400">
+                        本次认购未达到软顶要求（或超时未开盘），预售已终止，代币不会上线。您可发起退款收回认购的
+                        BNB，退款后认购份额作废。
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 退款区 */}
+                  <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#181a1d] p-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-neutral-400">可退金额</span>
+                      <span className="font-mono font-medium text-white">
+                        {formatDecimalText(
+                          Number(formatEther(userContribution)),
+                        )}{' '}
+                        BNB
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-neutral-400">对应认购份额</span>
+                      <span className="font-mono text-neutral-300">
+                        {formatTokenSupply(userShare, locale)} {token?.symbol}
+                        （退款后作废）
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled={isRefunding || userContribution <= 0n}
+                      onClick={handleRefund}
+                      className="h-10 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                    >
+                      {isRefunding ? (
+                        <>
+                          <Loader2 className="mr-1.5 size-4 animate-spin" />
+                          退款处理中…
+                        </>
+                      ) : userContribution > 0n ? (
+                        '申请退款'
+                      ) : (
+                        '无可退款金额'
+                      )}
+                    </Button>
+                    <p className="text-xs text-neutral-500">
+                      退款按原路返回您的钱包；如已退款则显示无可退金额。
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
               {/* 预售售罄进度条 (Binding Curve Percentage) */}
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between text-xs">
@@ -702,7 +873,7 @@ export function TokenDetailPage() {
                   value={tokenSalesPercent}
                   className="h-2 w-full bg-[#111213]"
                 />
-                <p className="text-[11px] text-neutral-400">
+                <p className="text-xs text-neutral-400">
                   当进度达到 100% 时，预售结束并自动触发一键加池开盘。
                 </p>
               </div>
@@ -756,6 +927,61 @@ export function TokenDetailPage() {
                 </div>
               )}
 
+              {/* 认购到期：任何人可触发结束预售（软顶已达成 → 待开盘；未达 → 退款流程） */}
+              {isPresaleWindowOver ? (
+                <div className="flex flex-col gap-3 rounded border border-[#2F3737] bg-[#181a1d] p-3">
+                  <div className="flex items-start gap-2.5">
+                    <Clock
+                      className={cn(
+                        'mt-0.5 size-5 shrink-0',
+                        isSoftCapReached
+                          ? 'text-emerald-400'
+                          : 'text-amber-400',
+                      )}
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          'text-sm font-bold',
+                          isSoftCapReached
+                            ? 'text-emerald-400'
+                            : 'text-amber-400',
+                        )}
+                      >
+                        {isSoftCapReached
+                          ? '认购已到期 · 软顶已达成'
+                          : '认购已到期 · 未达软顶'}
+                      </span>
+                      <span className="text-xs leading-relaxed text-neutral-400">
+                        {isSoftCapReached
+                          ? '认购窗口已结束，募集资金已达软顶。触发结束预售后将进入待开盘阶段，创建者需在 72 小时内加池上线。'
+                          : '认购窗口已结束且未达软顶。触发结束预售后将转入退款流程，届时认购者可按原路申请退款。'}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={isEndingPresale}
+                    onClick={handleTriggerEndPresale}
+                    className="h-10 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                  >
+                    {isEndingPresale ? (
+                      <>
+                        <Loader2 className="mr-1.5 size-4 animate-spin" />
+                        处理中…
+                      </>
+                    ) : isSoftCapReached ? (
+                      '结束预售 (进入待开盘)'
+                    ) : (
+                      '结束预售 (开启退款)'
+                    )}
+                  </Button>
+                  <p className="text-xs text-neutral-500">
+                    认购到期后任何人都可以触发结束预售，无需等待创建者操作。
+                  </p>
+                </div>
+              ) : (
+                <>
               {/* 认购输入与余额区 */}
               <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
                 <div className="flex items-center justify-between text-xs">
@@ -803,7 +1029,7 @@ export function TokenDetailPage() {
                   </span>
                 </div>
                 {isOverWalletLimit && (
-                  <span className="text-[11px] text-red-500">
+                  <span className="text-xs text-red-500">
                     超出单钱包限额！您当前最多还可认购 {remainingMaxBnbQuota} BNB
                   </span>
                 )}
@@ -823,7 +1049,7 @@ export function TokenDetailPage() {
                 </div>
 
                 {/* 预估换算 */}
-                <div className="flex items-center justify-between pt-1 text-[11px] text-neutral-400">
+                <div className="flex items-center justify-between pt-1 text-xs text-neutral-400">
                   <span>
                     预计获得：
                     <strong className="font-mono text-white">
@@ -855,6 +1081,10 @@ export function TokenDetailPage() {
                         : '预售已结束'}
                 </span>
               </Web3ActionButton>
+                </>
+              )}
+                </>
+              )}
             </div>
           </TabsContent>
 
@@ -955,38 +1185,38 @@ export function TokenDetailPage() {
 
             <div className="grid grid-cols-2 gap-3 pt-1">
               <div className="flex flex-col gap-1 border border-[#2F3737] bg-[#181a1d] p-3">
-                <span className="text-[11px] text-neutral-400">当前代币单价</span>
+                <span className="text-xs text-neutral-400">当前代币单价</span>
                 <span className="font-mono text-base font-bold text-white">
                   {tokenPriceData.priceUSD !== null
                     ? `$${formatNumber(tokenPriceData.priceUSD, 'zh-TW')}`
                     : '--'}
                 </span>
                 {tokenPriceData.priceBNB !== null && (
-                  <span className="font-mono text-[10px] text-neutral-400">
+                  <span className="font-mono text-xs text-neutral-400">
                     ≈ {formatDecimalText(tokenPriceData.priceBNB)} BNB
                   </span>
                 )}
               </div>
 
               <div className="flex flex-col gap-1 border border-[#2F3737] bg-[#181a1d] p-3">
-                <span className="text-[11px] text-neutral-400">流通市值</span>
+                <span className="text-xs text-neutral-400">流通市值</span>
                 <span className="font-mono text-base font-bold text-[#FFA546]">
                   {tokenPriceData.mcapUSD !== null
                     ? `$${formatNumber(tokenPriceData.mcapUSD, 'zh-TW')}`
                     : '--'}
                 </span>
-                <span className="text-[10px] text-neutral-400">总量恒定 100% 流通</span>
+                <span className="text-xs text-neutral-400">总量恒定 100% 流通</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
-              <div className="flex items-center justify-between text-[11px] text-neutral-400">
+              <div className="flex items-center justify-between text-xs text-neutral-400">
                 <span>交易滑点参考</span>
                 <span className="text-neutral-300">
                   买税 {token?.buyTax ?? 0}% / 卖税 {token?.sellTax ?? 0}%
                 </span>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-neutral-400">
+              <div className="flex items-center justify-between text-xs text-neutral-400">
                 <span>流动性池 (Pancake V2)</span>
                 <span className="font-mono text-white">
                   {tokenPriceData.stage === 'live' ? '已加池' : '用户自加池'}

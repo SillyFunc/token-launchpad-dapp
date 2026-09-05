@@ -286,7 +286,7 @@ export function StartTimePicker({
               </div>
 
               {/* 星期表头 */}
-              <div className="grid grid-cols-7 text-center text-[11px] text-neutral-500">
+              <div className="grid grid-cols-7 text-center text-xs text-neutral-500">
                 {WEEK_LABELS.map((w) => (
                   <span key={w} className="py-1">
                     {w}

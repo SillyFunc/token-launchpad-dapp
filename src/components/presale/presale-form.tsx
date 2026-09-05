@@ -11,7 +11,7 @@ import {
   secondsToHours,
   secondsToMinutes,
 } from 'date-fns'
-import { Info, Calculator, Coins } from 'lucide-react'
+import { Calculator, Coins } from 'lucide-react'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
@@ -734,15 +734,15 @@ export function PresaleForm({
       </div>
 
       <div className="flex flex-col gap-4">
-        <form.Subscribe
-          selector={(state) => ({
-            creatorBuyBnb: state.values.creatorBuyBnb,
-            creatorBuyTokens: state.values.creatorBuyTokens,
-            presaleTokenPrice: state.values.presaleTokenPrice,
-            hardcap: state.values.hardcap,
-            maxBuyPercent: state.values.maxBuyPercent,
-          })}
-        >
+          <form.Subscribe
+            selector={(state) => ({
+              creatorBuyBnb: state.values.creatorBuyBnb,
+              creatorBuyTokens: state.values.creatorBuyTokens,
+              presaleTokenPrice: state.values.presaleTokenPrice,
+              hardcap: state.values.hardcap,
+              maxBuyPercent: state.values.maxBuyPercent,
+            })}
+          >
           {({
             creatorBuyBnb,
             creatorBuyTokens,

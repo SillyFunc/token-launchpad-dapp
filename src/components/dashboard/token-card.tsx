@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConfig, useReadContract } from 'wagmi'
+import { useConfig, useConnection, useReadContract } from 'wagmi'
 import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
 import { formatEther, type Hex } from 'viem'
 import {
@@ -130,14 +130,19 @@ export function TokenCard({
   const { locale } = useLocale()
   const config = useConfig()
   const queryClient = useQueryClient()
+  const { address: walletAddress, connector: walletConnector } = useConnection()
   const [copied, setCopied] = useState(false)
   const [isClaiming, setIsClaiming] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [isEndConfirmOpen, setIsEndConfirmOpen] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
+  const [isAbandoning, setIsAbandoning] = useState(false)
+  const [isReclaimConfirmOpen, setIsReclaimConfirmOpen] = useState(false)
+  const [creatorBuyWithdrawn, setCreatorBuyWithdrawn] = useState(false)
 
   // 统一代币门禁守卫
   const {
+    isCreator,
     isIssued,
     isChainLoading,
     presaleAddress,
@@ -152,12 +157,14 @@ export function TokenCard({
     hardCap,
     isSoftCapReached: rawSoftCapReached,
     isSoldOut,
+    tokenState,
     canEdit,
     canIssue,
     canClaimAll,
     canSetupPresale,
     canEndPresale,
     canLaunch,
+    creatorBuyBnb,
   } = useTokenGate({ token })
 
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
@@ -223,6 +230,7 @@ export function TokenCard({
     isIssued,
     isChainLoading,
     tokensClaimed,
+    tokenState,
     presaleConfigured,
     presaleStatus,
     isSoftCapReached,
@@ -301,6 +309,77 @@ export function TokenCard({
     } finally {
       setIsEnding(false)
       setIsEndConfirmOpen(false)
+    }
+  }
+
+  // 预检：连接账户有效性 + 创建者身份（reclaim/relaunch 均仅创建者可调用；
+  // 账户不一致或非创建者时，钱包预估交易会直接报「预估失败」）
+  const ensureFailedActionAllowed = async (): Promise<boolean> => {
+    if (!isCreator) {
+      toast.error('仅代币创建者可执行此操作', '权限不足')
+      return false
+    }
+    if (walletConnector && walletAddress) {
+      try {
+        const accounts = await walletConnector.getAccounts()
+        if (
+          !accounts.some((a) => a.toLowerCase() === walletAddress.toLowerCase())
+        ) {
+          toast.error(
+            '钱包当前账户与连接账户不一致，请切回该账户或重新连接钱包',
+            '账户不一致',
+          )
+          return false
+        }
+      } catch {
+        // 预检失败不阻断，交由钱包在签名环节给出错误
+      }
+    }
+    return true
+  }
+
+  // 预售失败出口：领取代币，放弃本次预售（不可再重开）。
+  // 若配置过创建者购买注资，先自动提取注资，成功后接着领取代币（一次点击，顺序两笔交易）
+  const handleReclaimTokens = async () => {
+    if (!presaleAddress) return
+    if (!(await ensureFailedActionAllowed())) return
+
+    setIsAbandoning(true)
+    try {
+      if (creatorBuyBnb > 0n && !creatorBuyWithdrawn) {
+        const withdrawHash = await writeContract(config, {
+          address: presaleAddress,
+          abi: PresaleAbi,
+          functionName: 'withdrawCreatorBuy',
+          chainId: DEFAULT_CHAIN_ID,
+        })
+        await waitForTransactionReceipt(config, {
+          hash: withdrawHash,
+          chainId: DEFAULT_CHAIN_ID,
+        })
+        setCreatorBuyWithdrawn(true)
+        toast.success(
+          `创建者注资已提取！${formatDecimalText(Number(formatEther(creatorBuyBnb)))} BNB 已原路退回`,
+        )
+      }
+
+      const reclaimHash = await writeContract(config, {
+        address: presaleAddress,
+        abi: PresaleAbi,
+        functionName: 'reclaimTokens',
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      await waitForTransactionReceipt(config, {
+        hash: reclaimHash,
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      queryClient.invalidateQueries()
+      toast.success('代币已全部领取！本次预售已放弃，可自行添加流动性开盘交易')
+    } catch (err: unknown) {
+      toast.error(parseContractError(err, '操作失败，请稍后重试'), '操作失败')
+    } finally {
+      setIsAbandoning(false)
+      setIsReclaimConfirmOpen(false)
     }
   }
 
@@ -480,7 +559,7 @@ export function TokenCard({
           {isIssued && (presaleEnabled || presaleConfigured) && (
             <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#17191b] p-3 text-xs">
               {/* 预售核心盘口参数（一行一条） */}
-              <div className="flex flex-col divide-y divide-white/5 border-b border-white/5 pb-1 text-[11px]">
+              <div className="flex flex-col divide-y divide-white/5 border-b border-white/5 pb-1 text-xs">
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-neutral-400">预售价</span>
                   <span className="font-mono font-medium text-white">
@@ -518,7 +597,7 @@ export function TokenCard({
 
               {/* 进度条 1：50% 预售代币售罄进度 */}
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between text-xs">
                   <span className="flex items-center gap-1.5 text-neutral-400">
                     <span className="size-1.5 bg-[#FE810B]" />
                     预售份额售出 (50% 预售池)
@@ -546,7 +625,7 @@ export function TokenCard({
 
               {/* 进度条 2：软顶达成进度 */}
               <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between text-xs">
                   <span className="flex items-center gap-1.5 text-neutral-400">
                     <span className="size-1.5 bg-[#FFA546]" />
                     预售软顶达标线 (Soft Cap)
@@ -575,7 +654,7 @@ export function TokenCard({
               {/* 进度条 3：硬顶募资进度（若配置了硬顶） */}
               {hardCapNum > 0 && (
                 <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
-                  <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1.5 text-neutral-400">
                       <span className="size-1.5 bg-neutral-400" />
                       募资硬顶总进度 (Hard Cap)
@@ -673,7 +752,7 @@ export function TokenCard({
                       onLaunch(token)
                     }}
                     disabled={!canIssue.allowed}
-                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
                   >
                     <Rocket />
                     <span>我要发行</span>
@@ -713,7 +792,7 @@ export function TokenCard({
                     type="button"
                     size="default"
                     onClick={handlePresaleClick}
-                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
                   >
                     <Rocket />
                     <span>设置预售</span>
@@ -727,7 +806,7 @@ export function TokenCard({
                   type="button"
                   size="default"
                   onClick={() => onOpenPresale(token)}
-                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
                 >
                   <Rocket />
                   <span>开启预售</span>
@@ -746,7 +825,7 @@ export function TokenCard({
                     }
                     setIsEndConfirmOpen(true)
                   }}
-                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
                 >
                   <Rocket />
                   <span>结束预售</span>
@@ -761,7 +840,7 @@ export function TokenCard({
                   onAction={handleLaunchPool}
                   loading={isLaunching}
                   loadingText="开盘加池中…"
-                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
                 >
                   <Rocket />
                   <span>一键开盘上线 (Launch)</span>
@@ -770,27 +849,45 @@ export function TokenCard({
 
             case 'failed':
               return (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="default"
-                  disabled
-                >
-                  <span>预售失败</span>
-                </Button>
+                <div className="flex w-full flex-col gap-2.5">
+                  <div className="flex items-start gap-2 rounded border border-red-500/25 bg-red-500/10 p-2.5">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-red-400" />
+                    <div className="flex flex-col gap-0.5 text-left">
+                      <span className="text-xs font-bold text-red-400">
+                        预售失败
+                      </span>
+                      <span className="text-xs leading-relaxed text-neutral-400">
+                        本次认购未达到软顶要求或超时未完成开盘，预售已终止，代币暂未上线，本轮认购者可申请退款。领取代币即放弃本次预售。
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    onClick={() => setIsReclaimConfirmOpen(true)}
+                    disabled={isAbandoning}
+                    className="rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-white/10"
+                  >
+                    <Gift className="size-4" />
+                    <span>领取代币 (放弃预售)</span>
+                  </Button>
+                </div>
               )
 
             case 'terminal':
             default:
               return (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="default"
-                  disabled
-                >
-                  <span>{tokensClaimed ? '代币已领取' : '已上线交易'}</span>
-                </Button>
+                <div className="flex w-full flex-col gap-2.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="default"
+                    disabled
+                  >
+                    <span>{tokensClaimed ? '代币已领取' : '已上线交易'}</span>
+                  </Button>
+                </div>
               )
           }
         })()}
@@ -850,7 +947,7 @@ export function TokenCard({
               size="sm"
               disabled={isEnding}
               onClick={handleEndPresale}
-              className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
             >
               {isEnding ? (
                 <>
@@ -859,6 +956,62 @@ export function TokenCard({
                 </>
               ) : (
                 <span>确认结束</span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 领取代币（放弃预售）确认弹窗 */}
+      <Dialog
+        open={isReclaimConfirmOpen}
+        onOpenChange={(open) => !open && setIsReclaimConfirmOpen(false)}
+      >
+        <DialogContent className="max-w-md border border-[#484b51] bg-[#131516] p-0 text-white">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-400" />
+              <DialogTitle className="text-base font-bold text-white">
+                领取代币（放弃预售）？
+              </DialogTitle>
+            </div>
+            <DialogDescription className="mt-1.5 text-xs leading-relaxed text-neutral-400">
+              将把托管仓内的全部代币领取到你的钱包，本次预售永久放弃（不可再重开）。领取后代币即上线，可自行添加流动性交易。
+              {creatorBuyBnb > 0n && !creatorBuyWithdrawn &&
+                ' 确认后将自动提取创建者注资，再领取代币（共两笔交易）。'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-5">
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>注意：放弃后不可撤销，本轮认购者仍可按原路申请退款。</span>
+            </div>
+          </div>
+          <DialogFooter className="flex flex-row items-center justify-end gap-2 px-5 pb-5 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isAbandoning}
+              onClick={() => setIsReclaimConfirmOpen(false)}
+              className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isAbandoning}
+              onClick={handleReclaimTokens}
+              className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+            >
+              {isAbandoning ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>处理中…</span>
+                </>
+              ) : (
+                <span>确认领取</span>
               )}
             </Button>
           </DialogFooter>

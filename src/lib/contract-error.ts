@@ -157,6 +157,17 @@ export function parseContractError(
     return '钱包连接账户已失效（可能在钱包中切换过账户），请切回连接时的账户，或断开后重新连接钱包再试'
   }
 
+  // 1.y 钱包预估交易失败（模拟执行发现会 revert，常见为权限或状态不满足）
+  if (
+    msg.includes('Unable to estimate') ||
+    msg.includes('estimation failed') ||
+    msg.includes('estimateGas') ||
+    msg.includes('Call Validation') ||
+    msg.includes('预估失败')
+  ) {
+    return '交易预估失败：请确认当前连接的钱包账户是本代币的创建者，且满足该操作的状态要求'
+  }
+
   // 2. 余额不足支付 Gas 或主币转账
   if (
     msg.includes('insufficient funds') ||

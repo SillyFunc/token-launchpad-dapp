@@ -45,11 +45,14 @@ export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
       ? `$${formatNumber(priceUSD, locale)}`
       : '--'
   const marketCapText =
-    mcapUSD !== null
-      ? `$${formatNumber(mcapUSD, locale)}`
-      : stage === 'not_launched'
-        ? '未开盘'
-        : '--'
+    mcapUSD !== null ? `$${formatNumber(mcapUSD, locale)}` : '--'
+
+  const statusMeta =
+    stage === 'live'
+      ? { text: '已开盘', className: 'bg-emerald-500/15 text-emerald-400' }
+      : stage === 'presale'
+        ? { text: '预售中', className: 'bg-[#FFA546]/15 text-[#FFA546]' }
+        : { text: '未开盘', className: 'bg-neutral-800 text-neutral-400' }
 
   const isPositive = changePercent !== null && changePercent >= 0
   const changeText =
@@ -85,12 +88,17 @@ export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
           <span className="truncate text-xs font-bold leading-tight text-[#F0F0F0]">
             {token.name}
           </span>
-          <div className="flex items-center gap-1 text-[10px] leading-normal text-white/60">
+          <div className="flex items-center gap-1 text-xs leading-normal text-white/60">
             <span className="text-[#FFA546]">
               {marketCapText}
             </span>
+            <span
+              className={`rounded px-1 py-0.5 text-xs leading-none font-medium ${statusMeta.className}`}
+            >
+              {statusMeta.text}
+            </span>
             {tvlWarning && (
-              <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-400">
+              <span className="rounded bg-amber-500/15 px-1 py-0.5 text-xs text-amber-400">
                 {tvlWarning}
               </span>
             )}
@@ -107,7 +115,7 @@ export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
         </span>
         <div className="flex w-20 justify-end">
           <span
-            className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-mono font-bold leading-none ${
+            className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-xs font-mono font-bold leading-none ${
               isPositive
                 ? 'bg-[#0ECB81] text-white'
                 : changePercent !== null

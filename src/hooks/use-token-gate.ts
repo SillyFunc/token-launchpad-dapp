@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { isAddress, zeroAddress, parseEther, type Hex } from 'viem'
 
 import type { TokenDetail } from '@/api/token'
-import { CoordinatorFactoryAbi, PresaleAbi } from '@/contracts/abi'
+import { CoordinatorFactoryAbi, FlapTaxTokenV3Abi, PresaleAbi } from '@/contracts/abi'
 import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
@@ -45,27 +45,32 @@ export type TokenCardStage =
 export function resolveTokenStage(g: {
   isIssued: boolean
   isChainLoading: boolean
+  /** 托管仓已清空标志（getLaunchStatus.tokensClaimed） */
   tokensClaimed: boolean
+  /** 代币自身状态：>= 2 表示已上线（领取/开盘完成） */
+  tokenState?: number
   presaleConfigured: boolean
   presaleStatus?: number
   isSoftCapReached: boolean
 }): TokenCardStage {
+  // 领取/开盘完成的合并判定：reclaimTokens 只迁 token.state，不改托管仓标志
+  const claimed = g.tokensClaimed || (g.tokenState ?? 0) >= 2
   if (!g.isIssued) return 'draft'
   if (g.isChainLoading) return 'syncing'
-  if (!g.tokensClaimed && !g.presaleConfigured) return 'claim_or_setup'
+  if (!claimed && !g.presaleConfigured) return 'claim_or_setup'
   if (
-    !g.tokensClaimed &&
+    !claimed &&
     g.presaleConfigured &&
     (g.presaleStatus === 0 || g.presaleStatus === undefined)
   ) {
     return 'open_presale'
   }
-  if (!g.tokensClaimed && g.presaleStatus === 1) {
+  if (!claimed && g.presaleStatus === 1) {
     // 认购中：无论软顶是否达成，创建者均可随时结束（未达软顶结束将转入退款流程）
     return 'end_presale'
   }
-  if (!g.tokensClaimed && g.presaleStatus === 2) return 'launch'
-  if (!g.tokensClaimed && g.presaleStatus === 4) return 'failed'
+  if (!claimed && g.presaleStatus === 2) return 'launch'
+  if (!claimed && g.presaleStatus === 4) return 'failed'
   return 'terminal'
 }
 
@@ -106,6 +111,8 @@ export interface TokenGateResult {
   presaleAddress?: Hex
   presaleStatus?: number
   tokensClaimed: boolean
+  /** 代币自身状态（token.state()），>= 2 已上线 */
+  tokenState?: number
   presaleEnabled: boolean
   presaleOwner?: Hex
 
@@ -121,6 +128,8 @@ export interface TokenGateResult {
   vestingRate: bigint
   onchainPresalePrice: bigint
   onchainMaxBuy: bigint
+  presaleEndTime?: bigint
+  creatorBuyBnb: bigint
 
   // 动作权限守卫
   canEdit: GateAction
@@ -196,6 +205,14 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         args: [queryTokenAddress],
         chainId: DEFAULT_CHAIN_ID,
       },
+      {
+        // 代币自身状态：>= 2 表示已上线（领取/开盘完成），reclaimTokens 不改托管仓
+        // 的 presaleStatus/tokensClaimed，必须以此为准（docs §7.1）
+        address: queryTokenAddress,
+        abi: FlapTaxTokenV3Abi,
+        functionName: 'state',
+        chainId: DEFAULT_CHAIN_ID,
+      },
     ],
     query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
   })
@@ -204,6 +221,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const isConfiguredData = coordinatorBatch?.[1]?.result as boolean | undefined
   const onchainCreatorData = coordinatorBatch?.[2]?.result as string | undefined
   const presaleAddressData = coordinatorBatch?.[3]?.result as string | undefined
+  const rawTokenState = coordinatorBatch?.[4]?.result as bigint | undefined
+  const tokenState = rawTokenState !== undefined ? Number(rawTokenState) : undefined
 
   // 托管仓地址以链上 tokenPresales 为唯一权威来源；后端字段仅作链上读取缺失时的兜底，
   // 且必须通过下方统一校验（后端可能存有零地址等占位值，字符串非空会遮蔽链上数据）
@@ -290,6 +309,18 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         functionName: 'maxBuyPerWallet',
         chainId: DEFAULT_CHAIN_ID,
       },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'endTime',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'creatorBuyBnb',
+        chainId: DEFAULT_CHAIN_ID,
+      },
     ],
     query: {
       enabled: hasPresaleContract,
@@ -306,6 +337,9 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const rawVestingRate = (presaleBatch?.[6]?.result as bigint | undefined) ?? 0n
   const rawPresalePrice = (presaleBatch?.[7]?.result as bigint | undefined) ?? 0n
   const rawMaxBuy = (presaleBatch?.[8]?.result as bigint | undefined) ?? 0n
+  const rawEndTime = (presaleBatch?.[9]?.result as bigint | undefined) ?? 0n
+  const presaleEndTime = rawEndTime > 0n ? rawEndTime : undefined
+  const creatorBuyBnb = (presaleBatch?.[10]?.result as bigint | undefined) ?? 0n
 
   // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
@@ -532,7 +566,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         isLoading: false,
       }
     }
-    if (tokensClaimed) {
+    if (tokensClaimed || (tokenState ?? 0) >= 2) {
       return {
         allowed: false,
         reason:
@@ -578,7 +612,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     if (presaleEnabled) {
       return { allowed: false, reason: '预售已开启，无法一键领取代币' }
     }
-    if (tokensClaimed) {
+    if (tokensClaimed || (tokenState ?? 0) >= 2) {
       return { allowed: false, reason: '代币已领取，不可重复领取' }
     }
     return { allowed: true }
@@ -626,6 +660,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     presaleAddress,
     presaleStatus,
     tokensClaimed,
+    tokenState,
     presaleEnabled,
     presaleOwner,
     bnbAccumulated,
@@ -639,6 +674,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     vestingRate,
     onchainPresalePrice,
     onchainMaxBuy,
+    presaleEndTime,
+    creatorBuyBnb,
     canEdit,
     canIssue,
     canSetupPresale,
