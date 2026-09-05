@@ -321,6 +321,19 @@ export function useVanitySalt(options: UseVanitySaltOptions = {}) {
       })
   }, [chainId, options.tokenFactory, options.flapImplementation])
 
+  /** 清空搜盐结果，回到未生成状态（进行中的搜索会被终止） */
+  const reset = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    setSalt(null)
+    setPredictedAddress(null)
+    setIsSearching(false)
+    setAttempts(0)
+    setDurationMs(0)
+    setError(null)
+  }, [])
+
   useEffect(() => {
     if (autoSearch) {
       startSearch()
@@ -340,5 +353,6 @@ export function useVanitySalt(options: UseVanitySaltOptions = {}) {
     durationMs,
     error,
     regenerate: startSearch,
+    reset,
   }
 }
