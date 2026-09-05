@@ -121,6 +121,7 @@ export function TokenDetailPage() {
     onchainPresalePrice,
     onchainMaxBuy,
     presaleEndTime,
+    tokenState,
   } = useTokenGate({
     tokenAddress,
     token,
@@ -544,8 +545,49 @@ export function TokenDetailPage() {
     )
   }
 
+  // 未开盘且从未配置预售的代币（纯发行未领取）：不提供详情页；
+  // 配置过/开启过预售的代币（即使未开盘）允许进入
+  if (isIssued && (tokenState ?? 0) < 2 && !presaleEnabled) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-col items-center justify-center p-12 text-center text-white">
+        <Clock className="mb-3 size-10 text-amber-400" />
+        <h2 className="text-base font-bold">该代币尚未开盘</h2>
+        <p className="mt-1 text-xs text-neutral-400">
+          代币还未开启认购或未完成领取，开盘后将开放详情页浏览与交易。
+        </p>
+        <Button
+          variant="outline"
+          size="default"
+          onClick={() => navigate('/board')}
+          className="mt-4"
+        >
+          返回行情榜
+        </Button>
+      </div>
+    )
+  }
+
   // 是否开启了预售（严格以链上 presaleEnabled 为准）
-  const hasPresale = Boolean(isIssued && presaleEnabled)
+  // 预售失败后领取代币（reclaim 只迁 token.state >= 2，状态码停在 4）→ 纯发币模式开盘，走 DEX 交易视图
+  const isReclaimedAfterFailed =
+    presaleStatus === 4 && (tokenState ?? 0) >= 2
+  const hasPresale = Boolean(
+    isIssued && presaleEnabled && !isReclaimedAfterFailed,
+  )
+
+  // 已开盘（token.state() >= 2）：Defined 嵌入式 K 线
+  const klineChart =
+    (tokenState ?? 0) >= 2 && tokenAddress ? (
+      <div className="h-120 w-full overflow-hidden rounded border border-[#2F3737] bg-[#141517]">
+        <iframe
+          title="Flap 行情图表"
+          src="https://www.defined.fi/bsc/0x5bbf6458522a7c2f33415944e9ebacd0652d5c9a/embed?hideTxTable=1&hideSidebar=1&hideChart=0&hideChartEmptyBars=1&chartSmoothing=0&embedColorMode=DEFAULT&quoteToken=token0"
+          className="size-full transition-opacity duration-200"
+          allow="clipboard-write"
+          allowFullScreen
+        />
+      </div>
+    ) : null
 
   return (
     <div className="relative mx-auto flex w-full flex-col pb-28 pt-4 text-white">
@@ -718,12 +760,15 @@ export function TokenDetailPage() {
             >
               解锁
             </TabsTrigger>
-            <TabsTrigger
-              value="chart"
-              className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
-            >
-              图表 / 交易
-            </TabsTrigger>
+            {/* 图表/交易 Tab：仅已开盘上线的代币显示 */}
+            {(tokenState ?? 0) >= 2 && (
+              <TabsTrigger
+                value="chart"
+                className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
+              >
+                图表 / 交易
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* ===================== TAB 1: 预售认购面板 ===================== */}
@@ -1146,34 +1191,28 @@ export function TokenDetailPage() {
             </Web3ActionButton>
           </TabsContent>
 
-          {/* ===================== TAB 3: 图表与交易 ===================== */}
-          <TabsContent value="chart" className="space-y-4">
-            <div className="flex flex-col items-center justify-center border border-[#2F3737] bg-[#141517] p-8 text-center text-xs">
-              <TrendingUp className="size-10 text-[#FFA546] mb-3" />
-              <h3 className="text-sm font-bold text-white">DEX 价格与行情走势</h3>
-              <p className="mt-1 max-w-xs leading-relaxed text-neutral-400">
-                {presaleStatus === 3
-                  ? '该代币已在 PancakeSwap 上线交易，LP 流动性池已永久销毁死锁。'
-                  : '当前处于预售阶段。预售达标加池后，此处将展示实时交易 K 线图表与流动性数据。'}
-              </p>
-
-              {presaleStatus === 3 && (
-                <a
-                  href={`https://pancakeswap.finance/swap?outputCurrency=${tokenAddress}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-none border border-white/30 bg-[#1a1c1e] px-4 py-2 text-xs font-bold text-white hover:border-[#FE810B]"
-                >
-                  <span>前往 PancakeSwap 交易</span>
-                  <ExternalLink className="size-3" />
-                </a>
-              )}
+          {/* ===================== TAB 3: 图表与交易（仅已开盘上线） ===================== */}
+          {(tokenState ?? 0) >= 2 && (
+            <TabsContent value="chart" className="space-y-4">
+            {klineChart}
+            <div className="flex justify-end">
+              <a
+                href={`https://pancakeswap.finance/swap?outputCurrency=${tokenAddress}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-none border border-white/30 bg-[#1a1c1e] px-4 py-2 text-xs font-bold text-white hover:border-[#FE810B]"
+              >
+                <span>前往 PancakeSwap 交易</span>
+                <ExternalLink className="size-3" />
+              </a>
             </div>
-          </TabsContent>
+            </TabsContent>
+          )}
         </Tabs>
       ) : (
         /* 未开启预售 / 纯发币代币：直接展示 DEX 行情与现货交易看板 */
         <div className="space-y-4">
+          {klineChart}
           <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#141517] p-5 text-xs">
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <div className="flex items-center gap-2">

@@ -63,7 +63,7 @@ export function useBoardPricing(
     return list
   }, [tokens])
 
-  /* ① 全量代币：totalSupply + tokenPresales ------------------------------- */
+  /* ① 全量代币：totalSupply + tokenPresales + state（每代币 3 读） ---------- */
   const phase1Contracts = useMemo<ContractFunctionParameters[]>(
     () =>
       entries.flatMap((e) => [
@@ -80,6 +80,12 @@ export function useBoardPricing(
           args: [e.address],
           chainId: DEFAULT_CHAIN_ID,
         },
+        {
+          address: e.address,
+          abi: tokenAbi,
+          functionName: 'state',
+          chainId: DEFAULT_CHAIN_ID,
+        },
       ]),
     [entries],
   )
@@ -93,6 +99,7 @@ export function useBoardPricing(
     return entries.map((e, i) => {
       const supply = slot(phase1Data, i)
       const presale = slot(phase1Data, entries.length + i)
+      const state = slot(phase1Data, entries.length * 2 + i)
       return {
         key: e.key,
         totalSupply:
@@ -101,6 +108,9 @@ export function useBoardPricing(
           presale?.status === 'success' && presale.result !== zeroAddress
             ? (presale.result as Address)
             : null,
+        // 代币自身状态：>= 2 已上线（领取完成，含失败后领取代币）
+        tokenState:
+          state?.status === 'success' ? Number(state.result) : undefined,
       }
     })
   }, [entries, phase1Data])
@@ -220,12 +230,13 @@ export function useBoardPricing(
 
     // 预售期：lp 未添加，且 getLaunchStatus 为 enabled 且 status < 3 时用发行价展示
     for (const s of pairStates) {
-      if (s.pair) continue
-      const claimed = s.launchStatus?.[5] === true
+      // 已领取：托管仓标志，或代币 state >= 2（reclaimTokens 领取只迁 state，不改标志）
+      const claimed =
+        s.launchStatus?.[5] === true || (s.tokenState ?? 0) >= 2
       const launchEnabled = s.launchStatus?.[0] === true
       const launchStep = s.launchStatus ? Number(s.launchStatus[1]) : -1
 
-      // 已领取（纯发币领取完成，或开盘后仓空）→ 已开盘（等待创建者自建池）
+      // 已领取（从未开过预售，或开过预售但失败后放弃领取）→ 已开盘
       if (claimed) {
         map[s.key] = {
           baselinePriceBNB: null,
@@ -240,8 +251,8 @@ export function useBoardPricing(
         continue
       }
 
-      // 已开启预售（认购中 / 认购结束待开盘）→ 预售中
-      if (launchEnabled && (launchStep === 1 || launchStep === 2)) {
+      // 未领取 + 已配置/已开启预售（配置待开启 / 认购中 / 认购结束待开盘）→ 预售中
+      if (launchEnabled && launchStep >= 0 && launchStep <= 2) {
         map[s.key] = {
           baselinePriceBNB: null,
           pricing: {
@@ -256,7 +267,7 @@ export function useBoardPricing(
         }
       }
 
-      // 其余（未开启预售 / 配置未开启 / 预售失败）保持未开盘
+      // 其余（未领取 + 未开启预售 / 配置未开启 / 预售失败未领取）→ 未开盘
     }
 
     // 已开盘：pair 储备计价，预售发行价作为涨幅基准

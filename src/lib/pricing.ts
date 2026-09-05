@@ -39,6 +39,8 @@ export const pairAbi = parseAbi([
 
 export const tokenAbi = parseAbi([
   'function totalSupply() view returns (uint256)',
+  // 代币自身状态：>= 2 表示已上线（纯发行领取完成 / 开盘完成 / 失败后领取代币）
+  'function state() view returns (uint8)',
 ])
 
 let readClient: PublicClient | undefined
