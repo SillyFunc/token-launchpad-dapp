@@ -35,6 +35,19 @@
   },
   {
     "type": "function",
+    "name": "VANITY_SUFFIX",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint160",
+        "internalType": "uint160"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "allTokens",
     "inputs": [
       {
@@ -131,6 +144,19 @@
   {
     "type": "function",
     "name": "creationFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "creatorBps",
     "inputs": [],
     "outputs": [
       {
@@ -531,6 +557,32 @@
   },
   {
     "type": "function",
+    "name": "poolBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "presaleBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "presaleFactory",
     "inputs": [],
     "outputs": [
@@ -638,6 +690,29 @@
   },
   {
     "type": "function",
+    "name": "setAllocation",
+    "inputs": [
+      {
+        "name": "_creatorBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_poolBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_presaleBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setCreationFee",
     "inputs": [
       {
@@ -716,6 +791,11 @@
           },
           {
             "name": "startTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "duration",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -940,6 +1020,31 @@
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "AllocationUpdated",
+    "inputs": [
+      {
+        "name": "creatorBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "presaleBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -1269,6 +1374,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidAllocation",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidMaxBuyPerWallet",
     "inputs": []
   },
@@ -1280,6 +1390,11 @@
   {
     "type": "error",
     "name": "InvalidSalt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidVanitySuffix",
     "inputs": []
   },
   {

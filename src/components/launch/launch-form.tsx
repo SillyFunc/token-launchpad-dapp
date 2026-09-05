@@ -238,7 +238,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
               </div>
             </div>
             <Link
-              to="/launch"
+              to="/prelaunch"
               className="flex shrink-0 items-center justify-center whitespace-nowrap rounded border border-[#ffd98c] px-4 py-2 text-xs font-semibold text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black sm:px-6 sm:py-2.5"
             >
               <span>保留 CA</span>

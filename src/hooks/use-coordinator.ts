@@ -5,7 +5,6 @@ import {
   writeContract,
 } from '@wagmi/core'
 import {
-  bytesToHex,
   decodeEventLog,
   formatEther,
   type Hex,
@@ -16,6 +15,7 @@ import {
   DEFAULT_CHAIN_ID,
   getContractAddresses,
 } from '@/config/network'
+import { findVanitySaltSync } from '@/lib/vanity-salt'
 
 export interface CreateTokenParams {
   name: string
@@ -48,21 +48,28 @@ const KNOWN_ERRORS: Record<string, string> = {
   ZeroCreationFee: 'ZERO_CREATION_FEE',
   FactoryDisabled: 'FACTORY_DISABLED',
   InvalidSalt: 'INVALID_SALT',
+  InvalidVanitySuffix: 'INVALID_VANITY_SUFFIX',
+  NotReserver: 'NOT_RESERVER',
   AddressAlreadyDeployed: 'ADDRESS_ALREADY_DEPLOYED',
   AddressAlreadyReserved: 'ADDRESS_ALREADY_RESERVED',
+  InsufficientReservationFee: 'INSUFFICIENT_RESERVATION_FEE',
   TokenCreationFailed: 'TOKEN_CREATION_FAILED',
   ETHTransferFailed: 'ETH_TRANSFER_FAILED',
   InvalidFeeRecipient: 'INVALID_FEE_RECIPIENT',
+  BuyFeeTooHigh: 'BUY_FEE_TOO_HIGH',
+  SellFeeTooHigh: 'SELL_FEE_TOO_HIGH',
+  InvalidTaxDuration: 'INVALID_TAX_DURATION',
+  InvalidAntiFarmerDuration: 'INVALID_ANTI_FARMER_DURATION',
+  InvalidAllocation: 'INVALID_ALLOCATION',
 }
 
 export function percentToBps(percent: number): number {
   return Math.round(percent * 100)
 }
 
+/** 8888 靓号盐生成器（带真随机熵派生，平均 65536 次尝试，秒级产出） */
 export function generateSalt(): Hex {
-  const bytes = new Uint8Array(32)
-  crypto.getRandomValues(bytes)
-  return bytesToHex(bytes, { size: 32 })
+  return findVanitySaltSync().salt
 }
 
 /** 契约层错误码，由调用方（UI 层）映射为具体文案 */
@@ -145,6 +152,87 @@ export function useCreationFee() {
       fee !== undefined && fee !== null
         ? formatEther(fee)
         : undefined,
+  }
+}
+
+/** 读取 Coordinator 地址预留费用 */
+export function useReservationFee() {
+  const address = useCoordinatorFactory()
+  const query = useReadContract({
+    address,
+    abi: CoordinatorFactoryAbi,
+    functionName: 'reservationFee',
+    chainId: DEFAULT_CHAIN_ID,
+    query: {
+      enabled: Boolean(address),
+      staleTime: 30_000,
+    },
+  })
+
+  const fee = (query.data as bigint | undefined) ?? undefined
+
+  return {
+    ...query,
+    fee,
+    formattedFee:
+      fee !== undefined && fee !== null
+        ? formatEther(fee)
+        : undefined,
+  }
+}
+
+/** 锁定/预留 8888 靓号地址（可选防抢跑，0.01 BNB 服务费） */
+export function useReserveTokenAddress() {
+  const config = useConfig()
+  const coordinatorFactory = useCoordinatorFactory()
+  const { fee: reservationFee } = useReservationFee()
+
+  const execute = async (salt: Hex) => {
+    if (!coordinatorFactory) {
+      throw new CoordinatorError('WRONG_NETWORK')
+    }
+
+    let fee = reservationFee
+    if (fee === undefined) {
+      try {
+        fee = (await readContract(config, {
+          address: coordinatorFactory,
+          abi: CoordinatorFactoryAbi,
+          functionName: 'reservationFee',
+          chainId: DEFAULT_CHAIN_ID,
+        })) as bigint
+      } catch (readErr) {
+        console.warn('Direct readContract reservationFee failed:', readErr)
+      }
+    }
+    // 若网络瞬时异常，保底采用合约设定值 0.01 BNB
+    if (fee === undefined) {
+      fee = 10000000000000000n
+    }
+
+    const hash = await writeContract(config, {
+      address: coordinatorFactory,
+      abi: CoordinatorFactoryAbi,
+      functionName: 'reserveTokenAddress',
+      chainId: DEFAULT_CHAIN_ID,
+      args: [salt],
+      value: fee,
+    })
+
+    const receipt = await waitForTransactionReceipt(config, {
+      hash,
+      chainId: DEFAULT_CHAIN_ID,
+    })
+
+    return { hash, receipt }
+  }
+
+  return {
+    execute: (salt: Hex) => {
+      return execute(salt).catch((err) => {
+        throw toCoordinatorError(err)
+      })
+    },
   }
 }
 

@@ -45,10 +45,6 @@ export const router = createHashRouter([
         path: 'token/:address',
         Component: TokenDetailPage,
       },
-      {
-        path: 'detail',
-        Component: TokenDetailPage,
-      },
     ],
   },
 ])
