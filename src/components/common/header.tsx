@@ -34,9 +34,10 @@ export const Header = ({ isMenuOpen, onToggleMenu }: HeaderProps) => {
         </button>
       </div>
       <div className="flex shrink-0 items-center space-x-2">
+        {/* shadow-[0_3px_0_0_#963000] */}
         <Link
           to="/launch"
-          className="cursor-pointer rounded-md bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] px-6 py-1.5 text-sm font-semibold shadow-[0_3px_0_0_#963000] transition-all active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
+          className="cursor-pointer bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] px-6 py-1.5 text-sm font-semibold transition-all active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"
         >
           创建代币
         </Link>
