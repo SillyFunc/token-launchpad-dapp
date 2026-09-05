@@ -5,6 +5,12 @@ import { useForm } from '@tanstack/react-form'
 import { useConfig, useReadContract } from 'wagmi'
 import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
 import { parseEther, formatEther, isAddress, type Hex } from 'viem'
+import {
+  hoursToSeconds,
+  minutesToSeconds,
+  secondsToHours,
+  secondsToMinutes,
+} from 'date-fns'
 import { Info, Calculator, Coins } from 'lucide-react'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 
@@ -15,12 +21,32 @@ import { toast } from '@/components/ui/toast'
 import { updateTokenInfo, type TokenDetail } from '@/api/token'
 import { requestAuthSignature } from '@/api/auth'
 import { CreatorBuySection } from '@/components/presale/creator-buy-section'
+import { StartTimePicker } from '@/components/presale/start-time-picker'
 import { DEFAULT_CHAIN_ID, getContractAddresses } from '@/config/network'
 import { CoordinatorFactoryAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
 import { useLocale } from '@/lib/i18n'
 import { formatTokenSupply } from '@/lib/format'
 import { cn } from '@/lib/utils'
+
+/** 天 → 秒（date-fns v4 无 daysToSeconds，经小时换算） */
+const daysToSeconds = (days: number) => hoursToSeconds(days * 24)
+
+/** 认购时长单位 → 秒（date-fns 换算；合约约束：1 分钟 ~ 30 天，违规 revert InvalidDuration） */
+const DURATION_UNITS = {
+  分钟: minutesToSeconds,
+  小时: hoursToSeconds,
+  天: daysToSeconds,
+} as const
+type DurationUnit = keyof typeof DURATION_UNITS
+const DURATION_MIN_SEC = minutesToSeconds(1)
+const DURATION_MAX_SEC = daysToSeconds(30)
+/** NumericInput 在各时长单位下的上限 */
+const DURATION_UNIT_MAX: Record<DurationUnit, number> = {
+  分钟: secondsToMinutes(DURATION_MAX_SEC),
+  小时: secondsToHours(DURATION_MAX_SEC),
+  天: 30,
+}
 
 interface PresaleFormProps {
   token?: TokenDetail | null
@@ -100,6 +126,9 @@ export function PresaleForm({
         ? String(token.creatorBuyTokens)
         : '0',
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
+      startTime: '0',
+      durationValue: '30',
+      durationUnit: '分钟',
     },
     onSubmit: async ({ value }) => {
       const hardcapNum = Number(value.hardcap || '0')
@@ -133,6 +162,20 @@ export function PresaleForm({
       // 测试网环境：无论 UI 输入多少，接口与合约统一固定传入 5 分钟 (300 秒)
       const FIXED_VESTING_DELAY_SEC = 300
       const vestingDelaySec = BigInt(FIXED_VESTING_DELAY_SEC)
+
+      // 认购时长（秒）：1 分钟 ~ 30 天，默认 30 分钟
+      const durationSec = Math.round(
+        (DURATION_UNITS[(value.durationUnit || '分钟') as DurationUnit] ??
+          minutesToSeconds)(Number(value.durationValue || '0')),
+      )
+      if (durationSec < DURATION_MIN_SEC || durationSec > DURATION_MAX_SEC) {
+        toast.error('认购时长须在 1 分钟至 30 天之间')
+        return
+      }
+
+      // 开始时间：0 = 立即（链上语义）；后端与链上保持同口径传 0，
+      // 真实结束时间由后端解析 openPresale 交易后按链上 endTime 为准
+      const pickedStartSec = Number(value.startTime) || 0
 
       const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
       let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
@@ -181,7 +224,8 @@ export function PresaleForm({
               hardcap: hardcapWei,
               minLiquidityAmount: minLiquidityWei,
               softCap: softcapWei,
-              startTime: 0n,
+              startTime: BigInt(pickedStartSec),
+              duration: BigInt(durationSec),
               vestingDelay: vestingDelaySec,
               vestingRate: BigInt(Number(value.vestingRate || 5)),
               slippage: 0n,
@@ -218,8 +262,8 @@ export function PresaleForm({
           hardcap: value.hardcap,
           softcap: String(softcapNum),
           minLiquidityAmount: String(softcapNum),
-          startTime: 0,
-          endTime: 0,
+          startTime: pickedStartSec,
+          endTime: pickedStartSec > 0 ? pickedStartSec + durationSec : 0,
           vestingDelay: FIXED_VESTING_DELAY_SEC,
           vestingRate: Number(value.vestingRate) || 5,
           slippage: 0,
@@ -486,6 +530,98 @@ export function PresaleForm({
             )
           }}
         </form.Subscribe>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <FormSectionTitle title="认购时间" required />
+
+        <form.Field name="startTime">
+          {(field) => (
+            <FieldWrap
+              label="开始时间"
+              required
+              error={field.state.meta.errors[0]}
+            >
+              <StartTimePicker
+                value={field.state.value}
+                onChange={field.handleChange}
+                onBlur={field.handleBlur}
+              />
+            </FieldWrap>
+          )}
+        </form.Field>
+
+        <form.Field
+          name="durationValue"
+          validators={{
+            onChangeListenTo: ['durationUnit'],
+            onChange: ({ value, fieldApi }) => {
+              const unit = (fieldApi.form.getFieldValue('durationUnit') ||
+                '分钟') as DurationUnit
+              const n = Number(value)
+              if (!value || Number.isNaN(n) || n <= 0) return '请输入认购时长'
+              const sec = (DURATION_UNITS[unit] ?? minutesToSeconds)(n)
+              if (sec < DURATION_MIN_SEC || sec > DURATION_MAX_SEC)
+                return '认购时长须在 1 分钟至 30 天之间'
+              return undefined
+            },
+          }}
+        >
+          {(field) => (
+            <FieldWrap
+              label="认购时长"
+              required
+              error={field.state.meta.errors[0]}
+            >
+              <form.Subscribe
+                selector={(state) =>
+                  (state.values.durationUnit || '分钟') as DurationUnit
+                }
+              >
+                {(unit) => (
+                  <>
+                    <NumericInput
+                      id={field.name}
+                      name={field.name}
+                      placeholder=""
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      onBlur={field.handleBlur}
+                      title="设置认购时长"
+                      description="认购窗口自开始时间起持续多久，到期后可结束认购并加池"
+                      unit={unit}
+                      min={1}
+                      max={DURATION_UNIT_MAX[unit]}
+                      allowDecimal
+                      maxDecimals={2}
+                    />
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {(Object.keys(DURATION_UNITS) as DurationUnit[]).map(
+                        (u) => (
+                          <button
+                            key={u}
+                            type="button"
+                            onClick={() =>
+                              form.setFieldValue('durationUnit', u)
+                            }
+                            className={cn(
+                              'flex h-9 cursor-pointer items-center justify-center border text-xs font-semibold transition-all select-none',
+                              unit === u
+                                ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
+                                : 'border-[#2F3737] bg-[#1a1c1e] text-neutral-300 hover:border-[#FE810B]/50 hover:text-white',
+                            )}
+                          >
+                            {u}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </>
+                )}
+              </form.Subscribe>
+            </FieldWrap>
+          )}
+        </form.Field>
       </div>
 
       <div className="flex flex-col gap-4">

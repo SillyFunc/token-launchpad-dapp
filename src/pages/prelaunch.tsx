@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useConnection } from 'wagmi'
+import { format } from 'date-fns'
 import { ExternalLink, Info, Loader2 } from 'lucide-react'
 
 import { PageBackTitle } from '@/components/common/page-back-title'
@@ -198,7 +199,7 @@ export const Prelaunch = () => {
                       </span>
                       <span className="text-xs text-[#84888c]">
                         {item.reservedAt
-                          ? `锁定于 ${new Date(item.reservedAt).toLocaleString('zh-CN', { hour12: false })}`
+                          ? `锁定于 ${format(new Date(item.reservedAt), 'yyyy-MM-dd HH:mm:ss')}`
                           : '已锁定'}
                       </span>
                     </div>

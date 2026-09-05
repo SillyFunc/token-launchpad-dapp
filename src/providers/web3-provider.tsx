@@ -2,6 +2,7 @@ import { WagmiProvider, createConfig, http, webSocket, injected, fallback } from
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConnectKitProvider } from 'connectkit'
 import { walletConnect } from 'wagmi/connectors'
+import { mainnet } from 'viem/chains'
 
 import { CHAINS_CONFIG, SUPPORTED_CHAINS } from '@/config/network'
 
@@ -23,6 +24,8 @@ const config = createConfig({
       ...(CHAINS_CONFIG[56].rpcUrls.webSocket || []).map((url) => webSocket(url)),
       ...CHAINS_CONFIG[56].rpcUrls.http.map((url) => http(url)),
     ]),
+    // 以太坊主网（SUPPORTED_CHAINS 已启用，仅作钱包网络支持，平台合约暂未部署）
+    [mainnet.id]: http('https://ethereum-rpc.publicnode.com'),
   },
 })
 

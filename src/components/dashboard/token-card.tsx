@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Percent,
   Wallet,
+  AlertTriangle,
 } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
@@ -30,9 +31,22 @@ import {
   CardFooter,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
-import { formatAddress, formatTokenSupply, formatNumber } from '@/lib/format'
+import {
+  formatAddress,
+  formatTokenSupply,
+  formatNumber,
+  formatDecimalText,
+} from '@/lib/format'
 import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
 import { useLocale } from '@/lib/i18n'
@@ -65,13 +79,9 @@ const STAGE_CONFIG: Record<
     label: '待开启预售',
     className: 'border-orange-800/40 bg-orange-950/30 text-[#FFA546]',
   },
-  presale_live: {
-    label: '预售认购中',
-    className: 'border-emerald-800/40 bg-emerald-950/30 text-emerald-400',
-  },
   end_presale: {
-    label: '已达软顶',
-    className: 'border-green-800/40 bg-green-950/30 text-green-400',
+    label: '认购进行中',
+    className: 'border-amber-800/40 bg-amber-950/30 text-amber-400',
   },
   launch: {
     label: '待开盘上线',
@@ -123,6 +133,7 @@ export function TokenCard({
   const [copied, setCopied] = useState(false)
   const [isClaiming, setIsClaiming] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
+  const [isEndConfirmOpen, setIsEndConfirmOpen] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
 
   // 统一代币门禁守卫
@@ -151,6 +162,11 @@ export function TokenCard({
 
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
   const tokensSubscribedNum = Number(formatEther(tokensSubscribed))
+  // 单钱包限购（BNB 口径 = 代币上限 × 预售价，价格缺失时退回代币数量展示）
+  const maxBuyBnbNum =
+    Number(token.maxBuyPerWallet) > 0 && Number(token.presaleTokenPrice) > 0
+      ? Number(token.maxBuyPerWallet) * Number(token.presaleTokenPrice)
+      : 0
   const presaleShareNum =
     presaleShare > 0n
       ? Number(formatEther(presaleShare))
@@ -275,11 +291,16 @@ export function TokenCard({
         chainId: DEFAULT_CHAIN_ID,
       })
       queryClient.invalidateQueries()
-      toast.success('预售已成功结束！已进入待开盘加池阶段')
+      toast.success(
+        isSoftCapReached
+          ? '预售已成功结束！已进入待开盘加池阶段'
+          : '预售已结束！未达软顶，已转入退款流程（可重开预售）',
+      )
     } catch (err: unknown) {
       toast.error(parseContractError(err, '结束预售失败，请稍后重试'), '结束失败')
     } finally {
       setIsEnding(false)
+      setIsEndConfirmOpen(false)
     }
   }
 
@@ -464,7 +485,7 @@ export function TokenCard({
                   <span className="text-neutral-400">预售价</span>
                   <span className="font-mono font-medium text-white">
                     {token.presaleTokenPrice
-                      ? `${token.presaleTokenPrice} BNB`
+                      ? `${formatDecimalText(token.presaleTokenPrice)} BNB`
                       : '--'}
                   </span>
                 </div>
@@ -472,16 +493,18 @@ export function TokenCard({
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-neutral-400">单钱包限购</span>
                   <span className="font-mono font-medium text-white">
-                    {token.maxBuyPerWallet
-                      ? `${formatNumber(token.maxBuyPerWallet)} 枚`
-                      : '--'}
+                    {maxBuyBnbNum > 0
+                      ? `${formatDecimalText(maxBuyBnbNum)} BNB`
+                      : token.maxBuyPerWallet
+                        ? `${formatNumber(token.maxBuyPerWallet)} 枚`
+                        : '--'}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-neutral-400">已募 BNB</span>
                   <span className="font-mono font-semibold text-[#FFA546]">
-                    {bnbAccumulatedNum.toFixed(4)} BNB
+                    {formatDecimalText(bnbAccumulatedNum)} BNB
                   </span>
                 </div>
 
@@ -530,9 +553,9 @@ export function TokenCard({
                   </span>
                   <span className="font-mono text-neutral-300">
                     <strong className="text-white">
-                      {bnbAccumulatedNum.toFixed(4)}
+                      {formatDecimalText(bnbAccumulatedNum)}
                     </strong>{' '}
-                    / {softCapNum > 0 ? `${softCapNum} BNB` : '--'}
+                    / {softCapNum > 0 ? `${formatDecimalText(softCapNum)} BNB` : '--'}
                     <span
                       className={cn(
                         'ml-1.5 font-semibold',
@@ -559,9 +582,9 @@ export function TokenCard({
                     </span>
                     <span className="font-mono text-neutral-300">
                       <strong className="text-white">
-                        {bnbAccumulatedNum.toFixed(4)}
+                        {formatDecimalText(bnbAccumulatedNum)}
                       </strong>{' '}
-                      / {hardCapNum} BNB
+                      / {formatDecimalText(hardCapNum)} BNB
                       <span className="ml-1.5 font-semibold text-[#FFA546]">
                         ({hardCapPercent}%)
                       </span>
@@ -711,33 +734,23 @@ export function TokenCard({
                 </Button>
               )
 
-            case 'presale_live':
+            case 'end_presale':
               return (
                 <Button
                   type="button"
-                  variant="secondary"
                   size="default"
-                  disabled
-                  className="opacity-75"
-                >
-                  <Clock className="size-4 text-[#FFA546]" />
-                  <span>预售认购中 (未达软顶)</span>
-                </Button>
-              )
-
-            case 'end_presale':
-              return (
-                <Web3ActionButton
-                  type="button"
-                  size="default"
-                  onAction={handleEndPresale}
-                  loading={isEnding}
-                  loadingText="结束中…"
-                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                  onClick={() => {
+                    if (!canEndPresale.allowed) {
+                      toast.error(canEndPresale.reason || '当前不可结束预售')
+                      return
+                    }
+                    setIsEndConfirmOpen(true)
+                  }}
+                  className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5"
                 >
                   <Rocket />
                   <span>结束预售</span>
-                </Web3ActionButton>
+                </Button>
               )
 
             case 'launch':
@@ -782,6 +795,75 @@ export function TokenCard({
           }
         })()}
       </CardFooter>
+
+      {/* 结束预售确认弹窗 */}
+      <Dialog
+        open={isEndConfirmOpen}
+        onOpenChange={(open) => !open && setIsEndConfirmOpen(false)}
+      >
+        <DialogContent className="max-w-md border border-[#484b51] bg-[#131516] p-0 text-white">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-400" />
+              <DialogTitle className="text-base font-bold text-white">
+                确认结束预售？
+              </DialogTitle>
+            </div>
+            <DialogDescription className="mt-1.5 text-xs leading-relaxed text-neutral-400">
+              {isSoftCapReached
+                ? '本次认购已达到软顶。提前结束将立即终止认购：募集资金锁定在托管仓，之后可在 72 小时内一键加池开盘上线。'
+                : '本次认购未达到软顶。提前结束将立即终止认购：全部认购资金进入退款流程，用户按原路领取退款，认购份额作废；之后你可以重开新一轮预售。'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-5">
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-md border p-3 text-xs',
+                isSoftCapReached
+                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                  : 'border-amber-500/20 bg-amber-500/10 text-amber-300',
+              )}
+            >
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                {isSoftCapReached
+                  ? '注意：开盘窗口为结束后 72 小时，超时未加池，任何人可触发预售转为失败。'
+                  : '注意：结束不可撤销。未达软顶无法开盘上线代币，认购者只能退款。'}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter className="flex flex-row items-center justify-end gap-2 px-5 pb-5 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isEnding}
+              onClick={() => setIsEndConfirmOpen(false)}
+              className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isEnding}
+              onClick={handleEndPresale}
+              className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+            >
+              {isEnding ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>结束中…</span>
+                </>
+              ) : (
+                <span>确认结束</span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

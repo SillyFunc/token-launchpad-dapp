@@ -148,6 +148,15 @@ export function parseContractError(
     return '用户已在钱包中取消操作'
   }
 
+  // 1.x 钱包连接账户失效/不匹配（如 MetaMask 报
+  // "Simple Keyring - Unable to find matching address"）
+  if (
+    msg.includes('Unable to find matching address') ||
+    msg.includes('Simple Keyring')
+  ) {
+    return '钱包连接账户已失效（可能在钱包中切换过账户），请切回连接时的账户，或断开后重新连接钱包再试'
+  }
+
   // 2. 余额不足支付 Gas 或主币转账
   if (
     msg.includes('insufficient funds') ||

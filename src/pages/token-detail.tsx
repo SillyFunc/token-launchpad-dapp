@@ -31,7 +31,13 @@ import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toast'
-import { formatAddress, formatNumber } from '@/lib/format'
+import {
+  formatAddress,
+  formatNumber,
+  formatDecimalText,
+  formatTokenSupply,
+} from '@/lib/format'
+import { useLocale } from '@/lib/i18n'
 import { useTokenGate } from '@/hooks/use-token-gate'
 import { useTokenPrice } from '@/hooks/use-token-price'
 import {
@@ -69,7 +75,7 @@ export function TokenDetailPage() {
       ? (rawAddress.toLowerCase() as Hex)
       : undefined
 
-  const { address: userAddress } = useConnection()
+  const { address: userAddress, connector: walletConnector } = useConnection()
 
   const [activeTab, setActiveTab] = useState<'presale' | 'vesting' | 'chart'>(
     'presale',
@@ -169,6 +175,7 @@ export function TokenDetailPage() {
   }
 
   // 计算与格式化衍生数据（链上权威数据优先，后端数据兜底）
+  const { locale } = useLocale()
   const presalePriceNum =
     onchainPresalePrice > 0n
       ? Number(formatEther(onchainPresalePrice))
@@ -185,6 +192,13 @@ export function TokenDetailPage() {
       : totalSupply > 0n
         ? Number(formatEther(totalSupply / 2n))
         : 500_000
+  // 展示用份额 bigint（链上优先，后端/总量兜底）
+  const presaleShareDisplay =
+    presaleShare > 0n
+      ? presaleShare
+      : totalSupply > 0n
+        ? totalSupply / 2n
+        : 500000n
 
   const softCapNum =
     softCap > 0n
@@ -192,6 +206,10 @@ export function TokenDetailPage() {
       : Number(token?.softcap || token?.soft || 0)
   const hardCapNum =
     hardCap > 0n ? Number(formatEther(hardCap)) : Number(token?.hardcap || 0)
+
+  // 单钱包认购上限（BNB 口径 = 代币上限 × 预售价）
+  const maxBuyBnbNum =
+    maxBuyNum > 0 && presalePriceNum > 0 ? maxBuyNum * presalePriceNum : 0
 
   // 进度百分比计算
   const tokenSalesPercent =
@@ -290,6 +308,25 @@ export function TokenDetailPage() {
           )
         }
         return
+      }
+    }
+
+    // 预检：钱包当前账户与连接账户是否一致。MetaMask 切换过账户或连接过期时，
+    // 发交易会报 "Simple Keyring - Unable to find matching address"
+    if (walletConnector && userAddress) {
+      try {
+        const accounts = await walletConnector.getAccounts()
+        if (
+          !accounts.some((a) => a.toLowerCase() === userAddress.toLowerCase())
+        ) {
+          toast.error(
+            '钱包当前账户与连接账户不一致，请在钱包中切回该账户，或断开后重新连接钱包',
+            '认购失败',
+          )
+          return
+        }
+      } catch {
+        // 预检失败不阻断，交由钱包在签名环节给出错误
       }
     }
 
@@ -558,19 +595,19 @@ export function TokenDetailPage() {
           >
             <TabsTrigger
               value="presale"
-              className="flex-1 py-2.5 text-xs font-bold data-active:text-[#FE810B] data-active:border-b-2 data-active:border-[#FE810B]"
+              className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
             >
               预售
             </TabsTrigger>
             <TabsTrigger
               value="vesting"
-              className="flex-1 py-2.5 text-xs font-bold data-active:text-[#FE810B] data-active:border-b-2 data-active:border-[#FE810B]"
+              className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
             >
               解锁
             </TabsTrigger>
             <TabsTrigger
               value="chart"
-              className="flex-1 py-2.5 text-xs font-bold data-active:text-[#FE810B] data-active:border-b-2 data-active:border-[#FE810B]"
+              className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
             >
               图表 / 交易
             </TabsTrigger>
@@ -583,35 +620,44 @@ export function TokenDetailPage() {
               <div className="flex items-center justify-between py-2">
                 <span className="text-neutral-400">预售总份额</span>
                 <span className="font-mono font-medium text-white">
-                  {presaleShareNum.toLocaleString()} {token?.symbol}
+                  {formatTokenSupply(presaleShareDisplay, locale)}{' '}
+                  {token?.symbol}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-neutral-400">预售价</span>
                 <span className="font-mono font-medium text-white">
-                  {presalePriceNum > 0 ? `${presalePriceNum} BNB` : '--'}
+                  {presalePriceNum > 0
+                    ? `${formatDecimalText(presalePriceNum)} BNB`
+                    : '--'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-neutral-400">募资硬顶</span>
                 <span className="font-mono font-medium text-white">
-                  {hardCapNum > 0 ? `${hardCapNum} BNB` : '不设硬顶'}
+                  {hardCapNum > 0
+                    ? `${formatDecimalText(hardCapNum)} BNB`
+                    : '不设硬顶'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-neutral-400">预售软顶</span>
                 <span className="font-mono font-medium text-white">
-                  {softCapNum > 0 ? `${softCapNum} BNB` : '--'}
+                  {softCapNum > 0
+                    ? `${formatDecimalText(softCapNum)} BNB`
+                    : '--'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-neutral-400">单钱包认购上限</span>
                 <span className="font-mono font-medium text-white">
-                  {maxBuyNum > 0 ? `${formatNumber(maxBuyNum)} 枚` : '--'}
+                  {maxBuyBnbNum > 0
+                    ? `${formatDecimalText(maxBuyBnbNum)} BNB`
+                    : '--'}
                 </span>
               </div>
 
@@ -667,9 +713,9 @@ export function TokenDetailPage() {
                   <span className="text-neutral-300">软顶达成进度</span>
                   <span className="font-mono text-neutral-300">
                     <strong className="text-white">
-                      {bnbAccumulatedNum.toFixed(4)}
+                      {formatDecimalText(bnbAccumulatedNum)}
                     </strong>{' '}
-                    / {softCapNum > 0 ? `${softCapNum} BNB` : '--'}
+                    / {softCapNum > 0 ? `${formatDecimalText(softCapNum)} BNB` : '--'}
                     <span
                       className={cn(
                         'ml-1.5 font-bold',
@@ -695,9 +741,9 @@ export function TokenDetailPage() {
                     </span>
                     <span className="font-mono text-neutral-300">
                       <strong className="text-white">
-                        {bnbAccumulatedNum.toFixed(4)}
+                        {formatDecimalText(bnbAccumulatedNum)}
                       </strong>{' '}
-                      / {hardCapNum} BNB
+                      / {formatDecimalText(hardCapNum)} BNB
                       <span className="ml-1.5 font-bold text-[#FFA546]">
                         ({hardCapPercent}%)
                       </span>
@@ -719,14 +765,14 @@ export function TokenDetailPage() {
                       <span>
                         单钱包限购剩余：
                         <strong className="font-mono text-[#FFA546]">
-                          {remainingMaxBnbQuota} BNB
+                          {formatDecimalText(remainingMaxBnbQuota)} BNB
                         </strong>
                       </span>
                     )}
                     <span>
                       钱包余额：
                       <strong className="font-mono text-white">
-                        {userBnbBalance.toFixed(4)} BNB
+                        {formatDecimalText(userBnbBalance)} BNB
                       </strong>
                     </span>
                   </div>
@@ -742,7 +788,7 @@ export function TokenDetailPage() {
                   <input
                     type="text"
                     inputMode="decimal"
-                    placeholder="0.0"
+                    placeholder=""
                     value={subscribeAmount}
                     onChange={(e) => {
                       const val = e.target.value
@@ -917,7 +963,7 @@ export function TokenDetailPage() {
                 </span>
                 {tokenPriceData.priceBNB !== null && (
                   <span className="font-mono text-[10px] text-neutral-400">
-                    ≈ {tokenPriceData.priceBNB.toFixed(6)} BNB
+                    ≈ {formatDecimalText(tokenPriceData.priceBNB)} BNB
                   </span>
                 )}
               </div>

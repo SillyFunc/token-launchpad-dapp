@@ -120,6 +120,7 @@ export function IssueTokenModal({
       onSuccess(result.tokenAddress)
       onClose()
     } catch (err: unknown) {
+      onClose()
       toast.error(toErrorMessage(err), '发行失败')
     } finally {
       setIsExecuting(false)
@@ -231,7 +232,7 @@ export function IssueTokenModal({
         </div>
 
         <DialogFooter className="flex flex-row items-center justify-end gap-2 border-t border-[#2F3737] px-5 py-3">
-          <Button
+          {/*<Button
             type="button"
             variant="outline"
             size="sm"
@@ -240,23 +241,23 @@ export function IssueTokenModal({
             className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
           >
             取消
-          </Button>
+          </Button>*/}
           <Button
             type="button"
             size="sm"
             disabled={isExecuting || !canIssue.allowed}
             onClick={handleExecute}
-            className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
           >
             {isExecuting ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                <span>处理中…</span>
+                <span>发行中…</span>
               </>
             ) : (
               <>
                 <Rocket className="size-3.5" />
-                <span>确认并上链发行</span>
+                <span>确认发行</span>
               </>
             )}
           </Button>

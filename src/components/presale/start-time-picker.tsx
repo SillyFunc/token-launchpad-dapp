@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react'
-import { format } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
-import { Calendar as CalendarIcon, Clock, Zap, Timer, Check } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { format, isSameDay } from 'date-fns'
+import {
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Zap,
+  Timer,
+} from 'lucide-react'
 
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Calendar } from '@/components/ui/calendar'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 export interface StartTimePickerProps {
@@ -15,99 +17,191 @@ export interface StartTimePickerProps {
   disabled?: boolean
 }
 
+/** 将 Date 格式化为 HH:mm:ss 字符串 */
+function formatTimeStr(d: Date): string {
+  return format(d, 'HH:mm:ss')
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** 生成 1 小时后、秒位归零的默认时间 */
+function defaultTarget(): Date {
+  const d = new Date(Date.now() + 3600 * 1000)
+  d.setSeconds(0, 0)
+  return d
+}
+
+/** 按日期 + HH:mm:ss 在本地时区组装时刻 */
+function buildDateTime(date: Date, time: string): Date {
+  const [hours, minutes, seconds] = time.split(':').map((v) => Number(v) || 0)
+  const target = new Date(date)
+  target.setHours(hours, minutes, seconds, 0)
+  return target
+}
+
+/** 今天的 0 点 */
+function startOfToday(): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+/** 星期表头（周一为首列） */
+const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']
+
+const selectClass =
+  'h-9 min-w-0 flex-1 rounded-xs border border-[#484b51] bg-[#131516] px-1 text-center text-xs font-semibold text-white [color-scheme:dark] outline-none transition-colors focus:border-[#FE810B] disabled:cursor-not-allowed'
+
 export function StartTimePicker({
   value,
   onChange,
   onBlur,
   disabled = false,
 }: StartTimePickerProps) {
-  const isImmediate = !value || value === '0'
   const numericTimestamp = Number(value) || 0
 
-  // 内部日期状态
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(() => {
-    if (numericTimestamp > 0) {
-      return new Date(numericTimestamp * 1000)
-    }
-    // 默认提供 1 小时后的时间
-    return new Date(Date.now() + 3600 * 1000)
+  // 视觉模式与表单值解耦：进入「定时」选定具体时刻前不落值
+  const [mode, setMode] = useState<'immediate' | 'timed'>(
+    numericTimestamp > 0 ? 'timed' : 'immediate',
+  )
+  const [datePicked, setDatePicked] = useState(numericTimestamp > 0)
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(() =>
+    numericTimestamp > 0 ? new Date(numericTimestamp * 1000) : defaultTarget(),
+  )
+  const [timeStr, setTimeStr] = useState(() =>
+    numericTimestamp > 0
+      ? formatTimeStr(new Date(numericTimestamp * 1000))
+      : formatTimeStr(defaultTarget()),
+  )
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState(() => {
+    const base =
+      numericTimestamp > 0 ? new Date(numericTimestamp * 1000) : new Date()
+    return { year: base.getFullYear(), month: base.getMonth() }
   })
-
-  // 内部时间字符串状态 (HH:mm)
-  const [timeStr, setTimeStr] = useState<string>(() => {
-    if (numericTimestamp > 0) {
-      const d = new Date(numericTimestamp * 1000)
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-    }
-    const d = new Date(Date.now() + 3600 * 1000)
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  })
-
-  const [isOpen, setIsOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   // 同步外部传入的 value
   useEffect(() => {
     if (numericTimestamp > 0) {
       const d = new Date(numericTimestamp * 1000)
+      setMode('timed')
+      setDatePicked(true)
       setSelectedDate(d)
-      setTimeStr(
-        `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-      )
+      setTimeStr(formatTimeStr(d))
+    } else {
+      setMode('immediate')
+      setDatePicked(false)
     }
   }, [numericTimestamp])
 
-  const applyDateTime = (date: Date | undefined, time: string) => {
-    if (!date) return
-    const [hours, minutes] = time.split(':').map((v) => Number(v) || 0)
-    const target = new Date(date)
-    target.setHours(hours, minutes, 0, 0)
-    const unixSec = Math.floor(target.getTime() / 1000)
-    onChange(String(unixSec))
-  }
-
-  const handleSelectDate = (date: Date | undefined) => {
-    if (!date) return
-    setSelectedDate(date)
-    applyDateTime(date, timeStr)
-  }
-
-  const handleTimeChange = (newTime: string) => {
-    setTimeStr(newTime)
-    if (selectedDate) {
-      applyDateTime(selectedDate, newTime)
+  // 点击面板外部 / Esc 关闭（触发按钮自身交给 onClick 切换，避免关了又开）
+  useEffect(() => {
+    if (!open) return
+    const handlePointer = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        panelRef.current?.contains(target) ||
+        triggerRef.current?.contains(target)
+      ) {
+        return
+      }
+      setOpen(false)
+      onBlur?.()
     }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointer)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handlePointer)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [open, onBlur])
+
+  const now = new Date()
+  const isToday = selectedDate ? isSameDay(selectedDate, now) : false
+  const [hour, minute, second] = timeStr.split(':').map((v) => Number(v) || 0)
+
+  const applyDateTime = (date: Date, time: string) => {
+    onChange(String(Math.floor(buildDateTime(date, time).getTime() / 1000)))
   }
 
-  const handleQuickSet = (offsetHours: number) => {
-    const target = new Date(Date.now() + offsetHours * 3600 * 1000)
-    setSelectedDate(target)
-    const t = `${String(target.getHours()).padStart(2, '0')}:${String(target.getMinutes()).padStart(2, '0')}`
-    setTimeStr(t)
-    applyDateTime(target, t)
-    setIsOpen(false)
+  const openPanel = () => {
+    const base = selectedDate ?? now
+    setView({ year: base.getFullYear(), month: base.getMonth() })
+    setOpen(true)
+  }
+
+  const handleImmediate = () => {
+    setMode('immediate')
+    setDatePicked(false)
+    setOpen(false)
+    onChange('0')
+    onBlur?.()
+  }
+
+  const handleTimed = () => {
+    if (mode !== 'timed') {
+      setMode('timed')
+      setDatePicked(false)
+      setSelectedDate(defaultTarget())
+      setTimeStr(formatTimeStr(defaultTarget()))
+    }
+    onBlur?.()
+  }
+
+  // 日历网格：周一为首列，前置空位补位
+  const firstWeekday = (new Date(view.year, view.month, 1).getDay() + 6) % 7
+  const daysInMonth = new Date(view.year, view.month + 1, 0).getDate()
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ]
+
+  const handlePickDay = (day: number) => {
+    const date = new Date(view.year, view.month, day)
+    if (date < startOfToday()) return // 过去日期不允许
+    setSelectedDate(date)
+    // 选中的是今天且既定时刻已过去 → 顺延到 1 分钟后
+    if (isSameDay(date, now) && buildDateTime(date, timeStr).getTime() < Date.now()) {
+      setTimeStr(format(new Date(Date.now() + 60_000), 'HH:mm:ss'))
+    }
+    setDatePicked(true)
+  }
+
+  const updateTime = (part: 'hour' | 'minute' | 'second', val: number) => {
+    const parts = [hour, minute, second]
+    parts[part === 'hour' ? 0 : part === 'minute' ? 1 : 2] = val
+    setTimeStr(`${pad2(parts[0])}:${pad2(parts[1])}:${pad2(parts[2])}`)
+  }
+
+  /** 点击保存：应用面板中的草稿日期时间并关闭选择器 */
+  const handleSave = () => {
+    if (!datePicked || !selectedDate) return
+    applyDateTime(selectedDate, timeStr)
+    setOpen(false)
+    onBlur?.()
   }
 
   const displayDateTime =
-    !isImmediate && numericTimestamp > 0
-      ? format(new Date(numericTimestamp * 1000), 'yyyy年MM月dd日 HH:mm', {
-          locale: zhCN,
-        })
+    mode === 'timed' && datePicked && numericTimestamp > 0
+      ? format(new Date(numericTimestamp * 1000), 'yyyy年MM月dd日 HH:mm:ss')
       : null
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="relative flex flex-col gap-3">
       {/* 顶部模式切换按钮 */}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           disabled={disabled}
-          onClick={() => {
-            onChange('0')
-            onBlur?.()
-          }}
+          onClick={handleImmediate}
           className={cn(
             'flex h-10 cursor-pointer items-center justify-center gap-2 border text-xs font-semibold transition-all select-none',
-            isImmediate
+            mode === 'immediate'
               ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
               : 'border-[#484b51] bg-[#1a1c1e] text-neutral-400 hover:border-neutral-500 hover:text-white',
           )}
@@ -119,21 +213,10 @@ export function StartTimePicker({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => {
-            if (isImmediate) {
-              // 切换到定时模式时赋初值（1小时后）
-              const defaultTarget = new Date(Date.now() + 3600 * 1000)
-              setSelectedDate(defaultTarget)
-              const t = `${String(defaultTarget.getHours()).padStart(2, '0')}:${String(defaultTarget.getMinutes()).padStart(2, '0')}`
-              setTimeStr(t)
-              applyDateTime(defaultTarget, t)
-            }
-            setIsOpen(true)
-            onBlur?.()
-          }}
+          onClick={handleTimed}
           className={cn(
             'flex h-10 cursor-pointer items-center justify-center gap-2 border text-xs font-semibold transition-all select-none',
-            !isImmediate
+            mode === 'timed'
               ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
               : 'border-[#484b51] bg-[#1a1c1e] text-neutral-400 hover:border-neutral-500 hover:text-white',
           )}
@@ -143,108 +226,193 @@ export function StartTimePicker({
         </button>
       </div>
 
-      {/* 定时开始模式下的选择器触发器 */}
-      {!isImmediate && (
-        <Popover open={isOpen} onOpenChange={setIsOpen}>
-          <PopoverTrigger
-            render={
-              <button
-                type="button"
-                disabled={disabled}
-                className={cn(
-                  'flex h-10.5 w-full items-center justify-between border border-[#484b51] bg-[#1a1c1e] px-3.5 text-xs text-white transition-colors hover:border-[#FE810B] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]',
-                  disabled && 'cursor-not-allowed opacity-50',
-                )}
-              />
-            }
+      {/* 定时模式：一体化触发框 + 自绘日历/时间面板 */}
+      {mode === 'timed' && (
+        <>
+          <button
+            ref={triggerRef}
+            type="button"
+            disabled={disabled}
+            onClick={() => (open ? setOpen(false) : openPanel())}
+            className={cn(
+              'flex h-10.5 w-full items-center gap-2 rounded-xs border border-[#484b51] bg-[#1a1c1e] px-3.5 text-left text-sm text-white transition-colors hover:border-[#6b6f75] focus:border-[#FE810B] focus:outline-none',
+              disabled && 'cursor-not-allowed opacity-50',
+            )}
           >
-            <div className="flex items-center gap-2">
-              <CalendarIcon className="size-4 text-[#FFA546]" />
-              <span className="font-mono text-sm font-medium">
-                {displayDateTime || '请点击选择开始时间'}
-              </span>
-            </div>
-            <span className="text-[11px] text-[#FFA546] hover:underline">
-              更改时间
+            <CalendarIcon className="size-4 shrink-0 text-[#FFA546]" />
+            <span className="truncate font-mono font-medium">
+              {displayDateTime || '选择开始时间'}
             </span>
-          </PopoverTrigger>
+          </button>
 
-          <PopoverContent
-            align="start"
-            className="w-auto border border-[#484b51] bg-[#141618] p-4 text-white shadow-2xl"
-          >
-            <div className="flex flex-col gap-3">
-              {/* 日历组件 */}
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={handleSelectDate}
-                disabled={(date) =>
-                  date < new Date(Date.now() - 24 * 3600 * 1000)
-                }
-                locale={zhCN}
-                className="border border-[#2F3737] bg-[#181a1d] p-3 text-white"
-              />
-
-              {/* 时间微调与快捷设定 */}
-              <div className="flex flex-col gap-2 border border-[#2F3737] bg-[#181a1d] p-3">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs text-neutral-300">
-                    <Clock className="size-3.5 text-[#FFA546]" />
-                    具体时间 (24小时制)
-                  </span>
-                  <input
-                    type="time"
-                    value={timeStr}
-                    onChange={(e) => handleTimeChange(e.target.value)}
-                    className="h-7 border border-[#484b51] bg-[#131516] px-2 text-xs font-semibold text-white focus:border-[#FE810B] focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1.5 pt-1 text-[11px]">
-                  <span className="text-neutral-500">快捷预设:</span>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickSet(1)}
-                    className="cursor-pointer bg-white/5 px-2 py-0.5 text-neutral-300 hover:bg-white/10 hover:text-[#FFA546]"
-                  >
-                    1小时后
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickSet(3)}
-                    className="cursor-pointer bg-white/5 px-2 py-0.5 text-neutral-300 hover:bg-white/10 hover:text-[#FFA546]"
-                  >
-                    3小时后
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickSet(24)}
-                    className="cursor-pointer bg-white/5 px-2 py-0.5 text-neutral-300 hover:bg-white/10 hover:text-[#FFA546]"
-                  >
-                    明天此时
-                  </button>
-                </div>
+          {open && (
+            <div
+              ref={panelRef}
+              className="absolute inset-x-0 top-full z-50 mt-2 flex flex-col gap-2 rounded-xs border border-[#484b51] bg-[#141618] p-3 text-white shadow-2xl"
+            >
+              {/* 月份导航 */}
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  aria-label="上个月"
+                  onClick={() =>
+                    setView((v) =>
+                      v.month === 0
+                        ? { year: v.year - 1, month: 11 }
+                        : { ...v, month: v.month - 1 },
+                    )
+                  }
+                  className="flex size-8 cursor-pointer items-center justify-center rounded-xs text-neutral-400 hover:bg-white/10 hover:text-white"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+                <span className="text-sm font-semibold">
+                  {view.year}年{view.month + 1}月
+                </span>
+                <button
+                  type="button"
+                  aria-label="下个月"
+                  onClick={() =>
+                    setView((v) =>
+                      v.month === 11
+                        ? { year: v.year + 1, month: 0 }
+                        : { ...v, month: v.month + 1 },
+                    )
+                  }
+                  className="flex size-8 cursor-pointer items-center justify-center rounded-xs text-neutral-400 hover:bg-white/10 hover:text-white"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
               </div>
 
-              {/* 底部确认按钮 */}
-              <Button
+              {/* 星期表头 */}
+              <div className="grid grid-cols-7 text-center text-[11px] text-neutral-500">
+                {WEEK_LABELS.map((w) => (
+                  <span key={w} className="py-1">
+                    {w}
+                  </span>
+                ))}
+              </div>
+
+              {/* 日期网格：过去的日期禁用 */}
+              <div className="grid grid-cols-7 gap-y-1">
+                {cells.map((day, index) => {
+                  if (day === null) return <span key={`blank-${index}`} />
+                  const cellDate = new Date(view.year, view.month, day)
+                  const isPast = cellDate < startOfToday()
+                  const isSelected = selectedDate
+                    ? isSameDay(cellDate, selectedDate)
+                    : false
+                  const isTodayCell = isSameDay(cellDate, now)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      disabled={isPast}
+                      onClick={() => handlePickDay(day)}
+                      className={cn(
+                        'mx-auto flex size-9 items-center justify-center rounded-full text-xs transition-colors',
+                        isPast && 'cursor-not-allowed text-neutral-600',
+                        !isPast &&
+                          !isSelected &&
+                          'cursor-pointer text-neutral-200 hover:bg-white/10',
+                        isSelected &&
+                          'cursor-pointer bg-[#FE810B] font-bold text-white',
+                        !isSelected &&
+                          isTodayCell &&
+                          'border border-[#FE810B]/60 text-[#FFA546]',
+                      )}
+                    >
+                      {day}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* 时/分/秒：选完日期后出现；选今天时过去的时间项禁用 */}
+              {datePicked && (
+                <div className="flex items-center gap-2 border-t border-[#2F3737] pt-2.5">
+                  <select
+                    aria-label="时"
+                    value={pad2(hour)}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateTime('hour', Number(e.target.value))
+                    }
+                    className={selectClass}
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option
+                        key={h}
+                        value={pad2(h)}
+                        disabled={isToday && h < now.getHours()}
+                      >
+                        {pad2(h)}时
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="分"
+                    value={pad2(minute)}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateTime('minute', Number(e.target.value))
+                    }
+                    className={selectClass}
+                  >
+                    {Array.from({ length: 60 }, (_, m) => (
+                      <option
+                        key={m}
+                        value={pad2(m)}
+                        disabled={
+                          isToday &&
+                          hour === now.getHours() &&
+                          m < now.getMinutes()
+                        }
+                      >
+                        {pad2(m)}分
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="秒"
+                    value={pad2(second)}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateTime('second', Number(e.target.value))
+                    }
+                    className={selectClass}
+                  >
+                    {Array.from({ length: 60 }, (_, s) => (
+                      <option
+                        key={s}
+                        value={pad2(s)}
+                        disabled={
+                          isToday &&
+                          hour === now.getHours() &&
+                          minute === now.getMinutes() &&
+                          s < now.getSeconds()
+                        }
+                      >
+                        {pad2(s)}秒
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 保存：应用面板中的选择并关闭 */}
+              <button
                 type="button"
-                size="sm"
-                onClick={() => {
-                  if (selectedDate) {
-                    applyDateTime(selectedDate, timeStr)
-                  }
-                  setIsOpen(false)
-                }}
-                className="w-full bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white"
+                disabled={disabled || !datePicked}
+                onClick={handleSave}
+                className="flex h-10 w-full cursor-pointer items-center justify-center bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white [clip-path:polygon(10px_0,100%_0,100%_calc(100%-10px),calc(100%-10px)_100%,0_100%,0_10px)] transition-transform select-none active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <Check className="size-3.5" />
-                确认选用此时段
-              </Button>
+                保存
+              </button>
             </div>
-          </PopoverContent>
-        </Popover>
+          )}
+        </>
       )}
     </div>
   )

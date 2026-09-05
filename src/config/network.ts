@@ -1,4 +1,4 @@
-import { bsc, bscTestnet, type Chain } from 'viem/chains'
+import { bsc, bscTestnet, mainnet, type Chain } from 'viem/chains'
 import type { Hex } from 'viem'
 
 /**
@@ -13,7 +13,7 @@ const envChainId = typeof process !== 'undefined' && process.env?.PUBLIC_CHAIN_I
 
 export const DEFAULT_CHAIN_ID = (envChainId === 56 ? 56 : 97) as 56 | 97
 
-export const SUPPORTED_CHAINS = [bscTestnet, bsc] as const
+export const SUPPORTED_CHAINS = [bscTestnet, bsc, mainnet] as const
 
 export const DEFAULT_CHAIN: Chain =
   DEFAULT_CHAIN_ID === 56 ? bsc : bscTestnet

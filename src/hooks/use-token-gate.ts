@@ -19,6 +19,16 @@ export const PRESALE_STATUS_LABEL: Record<number, string> = {
 }
 
 /**
+ * 后端数值字段可能以 JSON number 返回，极小值（如单价 2e-10）经 String()
+ * 会输出科学计数法，parseEther 直接抛 InvalidDecimalNumberError。
+ */
+function toDecimalString(value: string | number | null | undefined): string {
+  const n = Number(value ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return '0'
+  return n.toFixed(18)
+}
+
+/**
  * 代币卡片的完整生命周期阶段（在 useTokenGate 链上态之上聚合而成）。
  * 顺序即优先级：草稿 → 同步中 → 二选一出口 → 预售各阶段 → 终态。
  */
@@ -27,8 +37,7 @@ export type TokenCardStage =
   | 'syncing' // 链上状态同步中
   | 'claim_or_setup' // 已发行未配置：领取 / 设置预售
   | 'open_presale' // 已配置待开启（status 0）
-  | 'presale_live' // 认购中（status 1，未达软顶）
-  | 'end_presale' // 认购中且已达软顶（status 1）
+  | 'end_presale' // 认购中（status 1，无论软顶是否达成均可结束）
   | 'launch' // 认购结束待开盘（status 2）
   | 'failed' // 发行失败（status 4）
   | 'terminal' // 已开盘（status 3）或已领取
@@ -52,7 +61,8 @@ export function resolveTokenStage(g: {
     return 'open_presale'
   }
   if (!g.tokensClaimed && g.presaleStatus === 1) {
-    return g.isSoftCapReached ? 'end_presale' : 'presale_live'
+    // 认购中：无论软顶是否达成，创建者均可随时结束（未达软顶结束将转入退款流程）
+    return 'end_presale'
   }
   if (!g.tokensClaimed && g.presaleStatus === 2) return 'launch'
   if (!g.tokensClaimed && g.presaleStatus === 4) return 'failed'
@@ -195,10 +205,16 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const onchainCreatorData = coordinatorBatch?.[2]?.result as string | undefined
   const presaleAddressData = coordinatorBatch?.[3]?.result as string | undefined
 
+  // 托管仓地址以链上 tokenPresales 为唯一权威来源；后端字段仅作链上读取缺失时的兜底，
+  // 且必须通过下方统一校验（后端可能存有零地址等占位值，字符串非空会遮蔽链上数据）
+  const chainPresaleAddr = presaleAddressData as string | undefined
+  const backendPresaleAddr = options?.token?.presaleAddress
   const rawPresaleAddr =
-    options?.token?.presaleAddress ||
-    (presaleAddressData as string | undefined) ||
-    ''
+    chainPresaleAddr && chainPresaleAddr !== zeroAddress
+      ? chainPresaleAddr
+      : typeof backendPresaleAddr === 'string'
+        ? backendPresaleAddr
+        : ''
 
   const presaleAddress =
     Boolean(rawPresaleAddr) &&
@@ -372,7 +388,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     rawSoftCap > 0n
       ? rawSoftCap
       : parseEther(
-          String(
+          toDecimalString(
             options?.token?.softcap ||
               options?.token?.soft ||
               options?.token?.minLiquidityAmount ||
@@ -384,7 +400,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const hardCap =
     rawHardCap > 0n
       ? rawHardCap
-      : parseEther(String(options?.token?.hardcap || '0'))
+      : parseEther(toDecimalString(options?.token?.hardcap || '0'))
 
   const presaleShare = (presaleShareData as bigint | undefined) ?? 0n
 
@@ -404,12 +420,12 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const onchainPresalePrice =
     rawPresalePrice > 0n
       ? rawPresalePrice
-      : parseEther(String(options?.token?.presaleTokenPrice || '0'))
+      : parseEther(toDecimalString(options?.token?.presaleTokenPrice || '0'))
 
   const onchainMaxBuy =
     rawMaxBuy > 0n
       ? rawMaxBuy
-      : parseEther(String(options?.token?.maxBuyPerWallet || '0'))
+      : parseEther(toDecimalString(options?.token?.maxBuyPerWallet || '0'))
 
   const isSoftCapReached = softCap > 0n && bnbAccumulated >= softCap
   const isSoldOut = presaleShare > 0n && tokensSubscribed >= presaleShare
@@ -576,19 +592,14 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     return { allowed: presaleStatus === 0 }
   })()
 
-  // 6. 结束预售 (canEndPresale): 状态处于 1 (认购中) + 必须达到软顶 + 是创建者
+  // 6. 结束预售 (canEndPresale): 状态处于 1 (认购中) + 是创建者
+  //    （合约允许创建者随时结束；未达软顶结束将进入退款流程）
   const canEndPresale: GateAction = (() => {
     if (!hasWallet || !isCreator || !hasPresaleContract) {
       return { allowed: false }
     }
     if (presaleStatus !== 1) {
       return { allowed: false, reason: '当前预售状态非认购中，不可结束预售' }
-    }
-    if (!isSoftCapReached) {
-      return {
-        allowed: false,
-        reason: '募集资金尚未达到预售软顶，暂不可结束预售',
-      }
     }
     return { allowed: true }
   })()

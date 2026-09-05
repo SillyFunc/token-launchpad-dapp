@@ -7,6 +7,7 @@ import {
   readContract,
   waitForTransactionReceipt,
 } from '@wagmi/core'
+import { isAddress, zeroAddress, type Hex } from 'viem'
 import {
   Coins,
   Rocket,
@@ -26,7 +27,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
-import { formatAddress, formatNumber } from '@/lib/format'
+import { formatAddress, formatNumber, formatDecimalText } from '@/lib/format'
 import { useTokenGate } from '@/hooks/use-token-gate'
 import {
   DEFAULT_CHAIN_ID,
@@ -61,15 +62,37 @@ export function OpenPresaleModal({
   const tokenAddress = token.coinContractAddress || ''
 
   const handleExecute = async () => {
-    if (!presaleAddress) {
-      toast.error('未找到该代币的托管仓合约')
-      return
-    }
-
     setIsExecuting(true)
     try {
       const coordinator =
         getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+
+      // 托管仓地址：优先用 gate 结果，缺失时直读链上兜底（避免列表读取时序误报「未找到」）
+      let escrow = presaleAddress
+      if (!escrow && isAddress(tokenAddress)) {
+        try {
+          const onChainEscrow = (await readContract(config, {
+            address: coordinator,
+            abi: CoordinatorFactoryAbi,
+            functionName: 'tokenPresales',
+            args: [tokenAddress as Hex],
+            chainId: DEFAULT_CHAIN_ID,
+          })) as string
+          if (isAddress(onChainEscrow) && onChainEscrow !== zeroAddress) {
+            escrow = onChainEscrow.toLowerCase() as Hex
+          }
+        } catch (readErr) {
+          console.warn('Read tokenPresales failed:', readErr)
+        }
+      }
+
+      if (!escrow) {
+        toast.error(
+          '未在链上找到该代币的托管仓，请确认代币已在链上发行',
+          '开启失败',
+        )
+        return
+      }
 
       // 预检：若链上尚未配置预售，引导先去配置
       let isConfiguredOnChain = presaleConfigured
@@ -94,7 +117,7 @@ export function OpenPresaleModal({
 
       // 直接调用 presale.openPresale() 开启认购
       const openHash = await writeContract(config, {
-        address: presaleAddress,
+        address: escrow,
         abi: PresaleAbi,
         functionName: 'openPresale',
         chainId: DEFAULT_CHAIN_ID,
@@ -116,22 +139,34 @@ export function OpenPresaleModal({
   }
 
   const presalePriceText = token.presaleTokenPrice
-    ? `${token.presaleTokenPrice} BNB / 枚`
+    ? `${formatDecimalText(token.presaleTokenPrice)} BNB / 枚`
     : '--'
 
-  const maxBuyText = token.maxBuyPerWallet
-    ? `${formatNumber(token.maxBuyPerWallet)} 枚`
-    : '--'
+  // 单钱包限购（BNB 口径 = 代币上限 × 预售价，价格缺失时退回代币数量展示）
+  const maxBuyBnbNum =
+    Number(token.maxBuyPerWallet) > 0 && Number(token.presaleTokenPrice) > 0
+      ? Number(token.maxBuyPerWallet) * Number(token.presaleTokenPrice)
+      : 0
 
-  const hardcapText = token.hardcap ? `${token.hardcap} BNB` : '不限'
+  const maxBuyText = maxBuyBnbNum
+    ? `${formatDecimalText(maxBuyBnbNum)} BNB`
+    : token.maxBuyPerWallet
+      ? `${formatNumber(token.maxBuyPerWallet)} 枚`
+      : '--'
+
+  const hardcapText = token.hardcap
+    ? `${formatDecimalText(token.hardcap)} BNB`
+    : '不限'
   const softcapText =
-    token.softcap || token.soft ? `${token.softcap || token.soft} BNB` : '--'
+    token.softcap || token.soft
+      ? `${formatDecimalText(token.softcap || token.soft)} BNB`
+      : '--'
 
   const vestingText = `每 ${token.vestingDelay || 7} 天释放 ${token.vestingRate || 10}%`
 
   const creatorBuyText =
     Number(token.creatorBuyBnb) > 0
-      ? `${token.creatorBuyBnb} BNB (随行就市)`
+      ? `${formatDecimalText(token.creatorBuyBnb)} BNB (随行就市)`
       : Number(token.creatorBuyTokens) > 0
         ? `${token.creatorBuyTokens} 枚代币 (精确买入)`
         : '不参与购买'
