@@ -19,6 +19,7 @@ import {
   type TokenDetail,
 } from '@/api/token'
 import { requestAuthSignature } from '@/api/auth'
+import { findVanitySalt } from '@/lib/vanity-salt'
 
 const optionalUrl = z.union([
   z.literal(''),
@@ -121,6 +122,18 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
       if (!address) return
 
       try {
+        // 平台代币地址强制 8888 尾号：创建前先本地搜盐，随表单交由后端保存；
+        // 搜盐失败必须终止保存（不发请求、不唤起签名），避免落库的代币无法对齐链上地址
+        let createSalt: string | undefined
+        if (!isEditMode) {
+          try {
+            createSalt = (await findVanitySalt()).salt
+          } catch {
+            toast.error('盐值计算失败，请重试')
+            return
+          }
+        }
+
         let coinImg = logoPreview ?? ''
         if (logoFile) {
           coinImg = await uploadTokenLogo(logoFile)
@@ -163,6 +176,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             website: value.links.website?.trim() ?? '',
             telegram: value.links.telegram?.trim() ?? '',
             twitter: value.links.twitter?.trim() ?? '',
+            salt: createSalt,
             ...auth,
           })
           toast.success('创建成功！')
