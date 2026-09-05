@@ -2,17 +2,8 @@ import { useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection, useConfig, useReadContract, useBalance } from 'wagmi'
-import {
-  writeContract,
-  waitForTransactionReceipt,
-} from '@wagmi/core'
-import {
-  parseEther,
-  formatEther,
-  formatUnits,
-  isAddress,
-  type Hex,
-} from 'viem'
+import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
+import { parseEther, formatEther, formatUnits, isAddress, type Hex } from 'viem'
 import {
   Coins,
   Copy,
@@ -34,6 +25,11 @@ import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
+import { KlineChart } from '@/components/common/kline-chart'
+
+/** K 线调试用写死代币地址（Defined 为主网行情，我们的代币未上主网查不到） */
+const DEBUG_KLINE_TOKEN_ADDRESS =
+  '0x5bbf6458522a7c2f33415944e9ebacd0652d5c9a'
 import { toast } from '@/components/ui/toast'
 import {
   formatAddress,
@@ -44,10 +40,7 @@ import {
 import { useLocale } from '@/lib/i18n'
 import { useTokenGate } from '@/hooks/use-token-gate'
 import { useTokenPrice } from '@/hooks/use-token-price'
-import {
-  DEFAULT_CHAIN_ID,
-  getExplorerUrl,
-} from '@/config/network'
+import { DEFAULT_CHAIN_ID, getExplorerUrl } from '@/config/network'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import { PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
@@ -164,34 +157,33 @@ export function TokenDetailPage() {
     },
   })
   // (share, claimable, claimed, nextVestingTime)
-  const [userShare = 0n, userClaimable = 0n, userClaimed = 0n, nextVestingTime = 0n] =
+  const [
+    userShare = 0n,
+    userClaimable = 0n,
+    userClaimed = 0n,
+    nextVestingTime = 0n,
+  ] =
     (userVestingData as
       | readonly [bigint, bigint, bigint, bigint]
       | undefined) ?? []
 
   // 用户认购支付记录（预售失败退款用）
-  const {
-    data: userContributionData,
-    refetch: refetchContribution,
-  } = useReadContract({
-    address: presaleAddress,
-    abi: PresaleAbi,
-    functionName: 'contributions',
-    args: userAddress ? [userAddress] : undefined,
-    chainId: DEFAULT_CHAIN_ID,
-    query: {
-      enabled: Boolean(presaleAddress && userAddress),
-      staleTime: 5_000,
-    },
-  })
+  const { data: userContributionData, refetch: refetchContribution } =
+    useReadContract({
+      address: presaleAddress,
+      abi: PresaleAbi,
+      functionName: 'contributions',
+      args: userAddress ? [userAddress] : undefined,
+      chainId: DEFAULT_CHAIN_ID,
+      query: {
+        enabled: Boolean(presaleAddress && userAddress),
+        staleTime: 5_000,
+      },
+    })
   const userContribution = (userContributionData as bigint | undefined) ?? 0n
 
   // ⑥ 价格行情数据 (WebSocket 实时订阅)
-  const tokenPriceData = useTokenPrice(
-    tokenAddress || '',
-    totalSupply,
-    0,
-  )
+  const tokenPriceData = useTokenPrice(tokenAddress || '', totalSupply, 0)
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -569,25 +561,14 @@ export function TokenDetailPage() {
 
   // 是否开启了预售（严格以链上 presaleEnabled 为准）
   // 预售失败后领取代币（reclaim 只迁 token.state >= 2，状态码停在 4）→ 纯发币模式开盘，走 DEX 交易视图
-  const isReclaimedAfterFailed =
-    presaleStatus === 4 && (tokenState ?? 0) >= 2
+  const isReclaimedAfterFailed = presaleStatus === 4 && (tokenState ?? 0) >= 2
   const hasPresale = Boolean(
     isIssued && presaleEnabled && !isReclaimedAfterFailed,
   )
 
   // 已开盘（token.state() >= 2）：Defined 嵌入式 K 线
-  const klineChart =
-    (tokenState ?? 0) >= 2 && tokenAddress ? (
-      <div className="h-120 w-full overflow-hidden rounded border border-[#2F3737] bg-[#141517]">
-        <iframe
-          title="Flap 行情图表"
-          src="https://www.defined.fi/bsc/0x5bbf6458522a7c2f33415944e9ebacd0652d5c9a/embed?hideTxTable=1&hideSidebar=1&hideChart=0&hideChartEmptyBars=1&chartSmoothing=0&embedColorMode=DEFAULT&quoteToken=token0"
-          className="size-full transition-opacity duration-200"
-          allow="clipboard-write"
-          allowFullScreen
-        />
-      </div>
-    ) : null
+  // 调试阶段 tokenAddress 写死为主网代币地址（我们的代币未上主网，Defined 查不到测试网行情）
+  const showKlineChart = (tokenState ?? 0) >= 2
 
   return (
     <div className="relative mx-auto flex w-full flex-col pb-28 pt-4 text-white">
@@ -904,230 +885,234 @@ export function TokenDetailPage() {
                 </>
               ) : (
                 <>
-              {/* 预售售罄进度条 (Binding Curve Percentage) */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-white tracking-wide">
-                    预售售罄进度
-                  </span>
-                  <span className="font-mono font-bold text-[#FE810B]">
-                    {tokenSalesPercent}%
-                  </span>
-                </div>
-                <Progress
-                  value={tokenSalesPercent}
-                  className="h-2 w-full bg-[#111213]"
-                />
-                <p className="text-xs text-neutral-400">
-                  当进度达到 100% 时，预售结束并自动触发一键加池开盘。
-                </p>
-              </div>
-
-              {/* 软顶达成进度条 */}
-              <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-neutral-300">软顶达成进度</span>
-                  <span className="font-mono text-neutral-300">
-                    <strong className="text-white">
-                      {formatDecimalText(bnbAccumulatedNum)}
-                    </strong>{' '}
-                    / {softCapNum > 0 ? `${formatDecimalText(softCapNum)} BNB` : '--'}
-                    <span
-                      className={cn(
-                        'ml-1.5 font-bold',
-                        isSoftCapReached ? 'text-green-400' : 'text-[#FFA546]',
-                      )}
-                    >
-                      ({softCapPercent}%)
-                    </span>
-                  </span>
-                </div>
-                <Progress
-                  value={softCapPercent}
-                  className="h-1.5 w-full bg-[#111213]"
-                />
-              </div>
-
-              {/* 硬顶达成进度条 (若配置了硬顶) */}
-              {hardCapNum > 0 && (
-                <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-neutral-300">
-                      募资硬顶进度
-                    </span>
-                    <span className="font-mono text-neutral-300">
-                      <strong className="text-white">
-                        {formatDecimalText(bnbAccumulatedNum)}
-                      </strong>{' '}
-                      / {formatDecimalText(hardCapNum)} BNB
-                      <span className="ml-1.5 font-bold text-[#FFA546]">
-                        ({hardCapPercent}%)
+                  {/* 预售售罄进度条 (Binding Curve Percentage) */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-white tracking-wide">
+                        预售售罄进度
                       </span>
-                    </span>
-                  </div>
-                  <Progress
-                    value={hardCapPercent}
-                    className="h-1.5 w-full bg-[#111213]"
-                  />
-                </div>
-              )}
-
-              {/* 认购到期：任何人可触发结束预售（软顶已达成 → 待开盘；未达 → 退款流程） */}
-              {isPresaleWindowOver ? (
-                <div className="flex flex-col gap-3 rounded border border-[#2F3737] bg-[#181a1d] p-3">
-                  <div className="flex items-start gap-2.5">
-                    <Clock
-                      className={cn(
-                        'mt-0.5 size-5 shrink-0',
-                        isSoftCapReached
-                          ? 'text-emerald-400'
-                          : 'text-amber-400',
-                      )}
-                    />
-                    <div className="flex flex-col gap-0.5">
-                      <span
-                        className={cn(
-                          'text-sm font-bold',
-                          isSoftCapReached
-                            ? 'text-emerald-400'
-                            : 'text-amber-400',
-                        )}
-                      >
-                        {isSoftCapReached
-                          ? '认购已到期 · 软顶已达成'
-                          : '认购已到期 · 未达软顶'}
-                      </span>
-                      <span className="text-xs leading-relaxed text-neutral-400">
-                        {isSoftCapReached
-                          ? '认购窗口已结束，募集资金已达软顶。触发结束预售后将进入待开盘阶段，创建者需在 72 小时内加池上线。'
-                          : '认购窗口已结束且未达软顶。触发结束预售后将转入退款流程，届时认购者可按原路申请退款。'}
+                      <span className="font-mono font-bold text-[#FE810B]">
+                        {tokenSalesPercent}%
                       </span>
                     </div>
+                    <Progress
+                      value={tokenSalesPercent}
+                      className="h-2 w-full bg-[#111213]"
+                    />
+                    <p className="text-xs text-neutral-400">
+                      当进度达到 100% 时，预售结束并自动触发一键加池开盘。
+                    </p>
                   </div>
-                  <Button
-                    type="button"
-                    disabled={isEndingPresale}
-                    onClick={handleTriggerEndPresale}
-                    className="h-10 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-                  >
-                    {isEndingPresale ? (
-                      <>
-                        <Loader2 className="mr-1.5 size-4 animate-spin" />
-                        处理中…
-                      </>
-                    ) : isSoftCapReached ? (
-                      '结束预售 (进入待开盘)'
-                    ) : (
-                      '结束预售 (开启退款)'
-                    )}
-                  </Button>
-                  <p className="text-xs text-neutral-500">
-                    认购到期后任何人都可以触发结束预售，无需等待创建者操作。
-                  </p>
-                </div>
-              ) : (
-                <>
-              {/* 认购输入与余额区 */}
-              <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-white">参与预售</span>
-                  <div className="flex items-center gap-2.5 text-neutral-400">
-                    {remainingMaxBnbQuota !== null && (
-                      <span>
-                        单钱包限购剩余：
-                        <strong className="font-mono text-[#FFA546]">
-                          {formatDecimalText(remainingMaxBnbQuota)} BNB
-                        </strong>
+
+                  {/* 软顶达成进度条 */}
+                  <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-neutral-300">软顶达成进度</span>
+                      <span className="font-mono text-neutral-300">
+                        <strong className="text-white">
+                          {formatDecimalText(bnbAccumulatedNum)}
+                        </strong>{' '}
+                        /{' '}
+                        {softCapNum > 0
+                          ? `${formatDecimalText(softCapNum)} BNB`
+                          : '--'}
+                        <span
+                          className={cn(
+                            'ml-1.5 font-bold',
+                            isSoftCapReached
+                              ? 'text-green-400'
+                              : 'text-[#FFA546]',
+                          )}
+                        >
+                          ({softCapPercent}%)
+                        </span>
                       </span>
-                    )}
-                    <span>
-                      钱包余额：
-                      <strong className="font-mono text-white">
-                        {formatDecimalText(userBnbBalance)} BNB
-                      </strong>
-                    </span>
+                    </div>
+                    <Progress
+                      value={softCapPercent}
+                      className="h-1.5 w-full bg-[#111213]"
+                    />
                   </div>
-                </div>
 
-                {/* 输入框 */}
-                <div
-                  className={cn(
-                    'flex h-11 items-center justify-between border border-[#484b51] bg-[#181a1d] px-3 focus-within:border-[#FE810B] transition-colors',
-                    isOverWalletLimit && 'border-red-500',
+                  {/* 硬顶达成进度条 (若配置了硬顶) */}
+                  {hardCapNum > 0 && (
+                    <div className="flex flex-col gap-1.5 border-t border-white/5 pt-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-neutral-300">募资硬顶进度</span>
+                        <span className="font-mono text-neutral-300">
+                          <strong className="text-white">
+                            {formatDecimalText(bnbAccumulatedNum)}
+                          </strong>{' '}
+                          / {formatDecimalText(hardCapNum)} BNB
+                          <span className="ml-1.5 font-bold text-[#FFA546]">
+                            ({hardCapPercent}%)
+                          </span>
+                        </span>
+                      </div>
+                      <Progress
+                        value={hardCapPercent}
+                        className="h-1.5 w-full bg-[#111213]"
+                      />
+                    </div>
                   )}
-                >
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder=""
-                    value={subscribeAmount}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                        setSubscribeAmount(val)
-                      }
-                    }}
-                    className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-600 focus:outline-none"
-                  />
-                  <span className="ml-2 font-mono text-xs font-bold text-[#FFA546] select-none">
-                    BNB
-                  </span>
-                </div>
-                {isOverWalletLimit && (
-                  <span className="text-xs text-red-500">
-                    超出单钱包限额！您当前最多还可认购 {remainingMaxBnbQuota} BNB
-                  </span>
-                )}
 
-                {/* 快捷百分比 (25% / 50% / 75% / 100%) */}
-                <div className="grid grid-cols-4 gap-2 pt-1">
-                  {[25, 50, 75, 100].map((percent) => (
-                    <button
-                      key={percent}
-                      type="button"
-                      onClick={() => handlePercentClick(percent)}
-                      className="flex h-8 cursor-pointer items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none active:scale-95 hover:border-[#FE810B] hover:text-[#FFA546]"
-                    >
-                      {percent}%
-                    </button>
-                  ))}
-                </div>
+                  {/* 认购到期：任何人可触发结束预售（软顶已达成 → 待开盘；未达 → 退款流程） */}
+                  {isPresaleWindowOver ? (
+                    <div className="flex flex-col gap-3 rounded border border-[#2F3737] bg-[#181a1d] p-3">
+                      <div className="flex items-start gap-2.5">
+                        <Clock
+                          className={cn(
+                            'mt-0.5 size-5 shrink-0',
+                            isSoftCapReached
+                              ? 'text-emerald-400'
+                              : 'text-amber-400',
+                          )}
+                        />
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className={cn(
+                              'text-sm font-bold',
+                              isSoftCapReached
+                                ? 'text-emerald-400'
+                                : 'text-amber-400',
+                            )}
+                          >
+                            {isSoftCapReached
+                              ? '认购已到期 · 软顶已达成'
+                              : '认购已到期 · 未达软顶'}
+                          </span>
+                          <span className="text-xs leading-relaxed text-neutral-400">
+                            {isSoftCapReached
+                              ? '认购窗口已结束，募集资金已达软顶。触发结束预售后将进入待开盘阶段，创建者需在 72 小时内加池上线。'
+                              : '认购窗口已结束且未达软顶。触发结束预售后将转入退款流程，届时认购者可按原路申请退款。'}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        disabled={isEndingPresale}
+                        onClick={handleTriggerEndPresale}
+                        className="h-10 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                      >
+                        {isEndingPresale ? (
+                          <>
+                            <Loader2 className="mr-1.5 size-4 animate-spin" />
+                            处理中…
+                          </>
+                        ) : isSoftCapReached ? (
+                          '结束预售 (进入待开盘)'
+                        ) : (
+                          '结束预售 (开启退款)'
+                        )}
+                      </Button>
+                      <p className="text-xs text-neutral-500">
+                        认购到期后任何人都可以触发结束预售，无需等待创建者操作。
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* 认购输入与余额区 */}
+                      <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-white">参与预售</span>
+                          <div className="flex items-center gap-2.5 text-neutral-400">
+                            {remainingMaxBnbQuota !== null && (
+                              <span>
+                                单钱包限购剩余：
+                                <strong className="font-mono text-[#FFA546]">
+                                  {formatDecimalText(remainingMaxBnbQuota)} BNB
+                                </strong>
+                              </span>
+                            )}
+                            <span>
+                              钱包余额：
+                              <strong className="font-mono text-white">
+                                {formatDecimalText(userBnbBalance)} BNB
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
 
-                {/* 预估换算 */}
-                <div className="flex items-center justify-between pt-1 text-xs text-neutral-400">
-                  <span>
-                    预计获得：
-                    <strong className="font-mono text-white">
-                      {estimatedTokens}
-                    </strong>{' '}
-                    {token?.symbol}
-                  </span>
-                  <span>全额按预售价计算</span>
-                </div>
-              </div>
+                        {/* 输入框 */}
+                        <div
+                          className={cn(
+                            'flex h-11 items-center justify-between border border-[#484b51] bg-[#181a1d] px-3 focus-within:border-[#FE810B] transition-colors',
+                            isOverWalletLimit && 'border-red-500',
+                          )}
+                        >
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder=""
+                            value={subscribeAmount}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                setSubscribeAmount(val)
+                              }
+                            }}
+                            className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-600 focus:outline-none"
+                          />
+                          <span className="ml-2 font-mono text-xs font-bold text-[#FFA546] select-none">
+                            BNB
+                          </span>
+                        </div>
+                        {isOverWalletLimit && (
+                          <span className="text-xs text-red-500">
+                            超出单钱包限额！您当前最多还可认购{' '}
+                            {remainingMaxBnbQuota} BNB
+                          </span>
+                        )}
 
-              {/* 参与预售主按钮 */}
-              <Web3ActionButton
-                type="button"
-                size="default"
-                onAction={handleSubscribe}
-                loading={isSubscribing}
-                loadingText="认购处理中…"
-                disabled={presaleStatus !== 1 || isOverWalletLimit}
-                className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-              >
-                <span>
-                  {presaleStatus === 0
-                    ? '预售尚未开启'
-                    : presaleStatus === 1
-                      ? '参与预售'
-                      : presaleStatus === 2
-                        ? '预售已结束 (待开盘)'
-                        : '预售已结束'}
-                </span>
-              </Web3ActionButton>
-                </>
-              )}
+                        {/* 快捷百分比 (25% / 50% / 75% / 100%) */}
+                        <div className="grid grid-cols-4 gap-2 pt-1">
+                          {[25, 50, 75, 100].map((percent) => (
+                            <button
+                              key={percent}
+                              type="button"
+                              onClick={() => handlePercentClick(percent)}
+                              className="flex h-8 cursor-pointer items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none active:scale-95 hover:border-[#FE810B] hover:text-[#FFA546]"
+                            >
+                              {percent}%
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* 预估换算 */}
+                        <div className="flex items-center justify-between pt-1 text-xs text-neutral-400">
+                          <span>
+                            预计获得：
+                            <strong className="font-mono text-white">
+                              {estimatedTokens}
+                            </strong>{' '}
+                            {token?.symbol}
+                          </span>
+                          <span>全额按预售价计算</span>
+                        </div>
+                      </div>
+
+                      {/* 参与预售主按钮 */}
+                      <Web3ActionButton
+                        type="button"
+                        size="default"
+                        onAction={handleSubscribe}
+                        loading={isSubscribing}
+                        loadingText="认购处理中…"
+                        disabled={presaleStatus !== 1 || isOverWalletLimit}
+                        className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
+                      >
+                        <span>
+                          {presaleStatus === 0
+                            ? '预售尚未开启'
+                            : presaleStatus === 1
+                              ? '参与预售'
+                              : presaleStatus === 2
+                                ? '预售已结束 (待开盘)'
+                                : '预售已结束'}
+                        </span>
+                      </Web3ActionButton>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1139,7 +1124,8 @@ export function TokenDetailPage() {
               <div className="flex items-center justify-between py-2.5">
                 <span className="text-neutral-400">我的认购总份额</span>
                 <span className="font-mono font-bold text-white">
-                  {Number(formatEther(userShare)).toLocaleString()} {token?.symbol}
+                  {Number(formatEther(userShare)).toLocaleString()}{' '}
+                  {token?.symbol}
                 </span>
               </div>
 
@@ -1192,34 +1178,40 @@ export function TokenDetailPage() {
           </TabsContent>
 
           {/* ===================== TAB 3: 图表与交易（仅已开盘上线） ===================== */}
-          {(tokenState ?? 0) >= 2 && (
-            <TabsContent value="chart" className="space-y-4">
-            {klineChart}
-            <div className="flex justify-end">
-              <a
-                href={`https://pancakeswap.finance/swap?outputCurrency=${tokenAddress}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-none border border-white/30 bg-[#1a1c1e] px-4 py-2 text-xs font-bold text-white hover:border-[#FE810B]"
-              >
-                <span>前往 PancakeSwap 交易</span>
-                <ExternalLink className="size-3" />
-              </a>
-            </div>
+          {showKlineChart && (
+            <TabsContent value="chart" className="space-y-4" keepMounted>
+              <KlineChart tokenAddress={DEBUG_KLINE_TOKEN_ADDRESS} />
+              <div className="flex justify-end">
+                <a
+                  href={`https://pancakeswap.finance/swap?outputCurrency=${tokenAddress}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-none border border-white/30 bg-[#1a1c1e] px-4 py-2 text-xs font-bold text-white hover:border-[#FE810B]"
+                >
+                  <span>前往 PancakeSwap 交易</span>
+                  <ExternalLink className="size-3" />
+                </a>
+              </div>
             </TabsContent>
           )}
         </Tabs>
       ) : (
         /* 未开启预售 / 纯发币代币：直接展示 DEX 行情与现货交易看板 */
         <div className="space-y-4">
-          {klineChart}
+          {showKlineChart && (
+            <KlineChart tokenAddress={DEBUG_KLINE_TOKEN_ADDRESS} />
+          )}
           <div className="flex flex-col gap-3 border border-[#2F3737] bg-[#141517] p-5 text-xs">
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <div className="flex items-center gap-2">
                 <TrendingUp className="size-4 text-[#FFA546]" />
-                <span className="text-sm font-bold text-white">DEX 现货行情</span>
+                <span className="text-sm font-bold text-white">
+                  DEX 现货行情
+                </span>
               </div>
-              <span className="text-xs font-mono text-[#0ECB81]">已在 DEX 自由交易</span>
+              <span className="text-xs font-mono text-[#0ECB81]">
+                已在 DEX 自由交易
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1244,7 +1236,9 @@ export function TokenDetailPage() {
                     ? `$${formatNumber(tokenPriceData.mcapUSD, 'zh-TW')}`
                     : '--'}
                 </span>
-                <span className="text-xs text-neutral-400">总量恒定 100% 流通</span>
+                <span className="text-xs text-neutral-400">
+                  总量恒定 100% 流通
+                </span>
               </div>
             </div>
 
