@@ -97,9 +97,10 @@ export function useBoardPricing(
 
   const tokenStates = useMemo(() => {
     return entries.map((e, i) => {
-      const supply = slot(phase1Data, i)
-      const presale = slot(phase1Data, entries.length + i)
-      const state = slot(phase1Data, entries.length * 2 + i)
+      // 槽位与 flatMap 顺序一一对应：每代币 3 读连续排列 [supply, presale, state]
+      const supply = slot(phase1Data, i * 3)
+      const presale = slot(phase1Data, i * 3 + 1)
+      const state = slot(phase1Data, i * 3 + 2)
       return {
         key: e.key,
         totalSupply:

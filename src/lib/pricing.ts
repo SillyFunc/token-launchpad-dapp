@@ -197,31 +197,6 @@ export async function getPricing(
   return { stage: 'not_launched', priceBNB: null, tokenReserve: null, bnbReserve: null, pair: null, baselinePriceBNB: null }
 }
 
-let bnbUsdCache = 0
-let bnbUsdTimestamp = 0
-
-export async function getBnbUsd(): Promise<number> {
-  const now = Date.now()
-  if (bnbUsdCache && now - bnbUsdTimestamp < 30_000) return bnbUsdCache
-  try {
-    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT')
-    const json = await res.json() as { price: string }
-    bnbUsdCache = Number(json.price)
-    bnbUsdTimestamp = now
-    return bnbUsdCache
-  } catch {
-    return bnbUsdCache || 0
-  }
-}
-
-export function calcMcapUsd(priceBNB: number, bnbUsd: number, totalSupply: bigint): number {
-  return priceBNB * bnbUsd * Number(formatUnits(totalSupply, 18))
-}
-
-export function calcTvlUsd(bnbReserve: bigint, bnbUsd: number): number {
-  return Number(formatUnits(bnbReserve, 18)) * 2 * bnbUsd
-}
-
 /* -------------------------------------------------------------------------- */
 /* 涨幅基准 — 预售发行价优先，否则记录首次见到的 live 价格（localStorage）       */
 /* -------------------------------------------------------------------------- */

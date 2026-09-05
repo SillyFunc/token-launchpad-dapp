@@ -3,49 +3,32 @@ import { formatUnits } from 'viem'
 import { Coins } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
-import { formatNumber } from '@/lib/format'
 import type { Locale } from '@/lib/i18n'
 import type { BoardTokenPricing } from '@/hooks/use-board-pricing'
 
 export interface TokenRowProps {
   token: TokenDetail
   locale: Locale
-  bnbUsd: number
   pricing?: BoardTokenPricing
 }
 
-export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
+export function TokenRow({ token, pricing }: TokenRowProps) {
   const navigate = useNavigate()
   const tokenAddress = token.coinContractAddress || ''
 
   const {
-    totalSupply,
     stage = 'not_launched',
-    priceBNB = null,
     bnbReserve = null,
     changePercent = null,
   } = pricing ?? {}
 
-  const priceUSD =
-    priceBNB !== null && bnbUsd > 0 ? priceBNB * bnbUsd : null
-  const mcapUSD =
-    priceUSD !== null && totalSupply
-      ? priceUSD * Number(formatUnits(totalSupply, 18))
-      : null
+  // 池子 TVL（双边合计）低于 1 BNB 视为低流动性
   const tvlWarning =
     stage === 'live' &&
     bnbReserve !== null &&
-    bnbUsd > 0 &&
-    Number(formatUnits(bnbReserve, 18)) * 2 * bnbUsd < 200
+    Number(formatUnits(bnbReserve, 18)) * 2 < 1
       ? '低流动性'
       : null
-
-  const priceText =
-    priceUSD !== null
-      ? `$${formatNumber(priceUSD, locale)}`
-      : '--'
-  const marketCapText =
-    mcapUSD !== null ? `$${formatNumber(mcapUSD, locale)}` : '--'
 
   const statusMeta =
     stage === 'live'
@@ -89,9 +72,6 @@ export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
             {token.name}
           </span>
           <div className="flex items-center gap-1 text-xs leading-normal text-white/60">
-            <span className="text-[#FFA546]">
-              {marketCapText}
-            </span>
             <span
               className={`rounded px-1 py-0.5 text-xs leading-none font-medium ${statusMeta.className}`}
             >
@@ -111,7 +91,7 @@ export function TokenRow({ token, locale, bnbUsd, pricing }: TokenRowProps) {
 
       <div className="flex shrink-0 items-center gap-3">
         <span className="w-14 text-right font-mono text-xs font-bold text-[#AAAAAA]">
-          {priceText}
+          --
         </span>
         <div className="flex w-20 justify-end">
           <span

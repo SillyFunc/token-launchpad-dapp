@@ -14,9 +14,7 @@ import {
 
 export interface TokenPriceData {
   priceBNB: number | null
-  priceUSD: number | null
-  mcapUSD: number | null
-  tvlUSD: number | null
+  mcapBNB: number | null
   stage: PricingResult['stage']
   changePercent: number | null
 }
@@ -24,7 +22,6 @@ export interface TokenPriceData {
 export function useTokenPrice(
   tokenAddr: Address | '',
   totalSupply: bigint | undefined,
-  bnbUsd: number,
 ): TokenPriceData {
   const [result, setResult] = useState<PricingResult | null>(null)
   const baselineRef = useRef<number | null>(null)
@@ -114,19 +111,12 @@ export function useTokenPrice(
   }, [result, tokenAddr])
 
   if (!result || !totalSupply) {
-    return { priceBNB: null, priceUSD: null, mcapUSD: null, tvlUSD: null, stage: 'not_launched', changePercent: null }
+    return { priceBNB: null, mcapBNB: null, stage: 'not_launched', changePercent: null }
   }
 
   const priceBNB = result.priceBNB
-  const priceUSD = priceBNB !== null && bnbUsd > 0 ? priceBNB * bnbUsd : null
-  const mcapUSD =
-    priceBNB !== null && bnbUsd > 0
-      ? priceBNB * bnbUsd * Number(formatUnits(totalSupply, 18))
-      : null
-  const tvlUSD =
-    result.stage === 'live' && result.bnbReserve && bnbUsd > 0
-      ? Number(formatUnits(result.bnbReserve, 18)) * 2 * bnbUsd
-      : null
+  const mcapBNB =
+    priceBNB !== null ? priceBNB * Number(formatUnits(totalSupply, 18)) : null
 
   const baseline = baselineRef.current
   const changePercent =
@@ -136,5 +126,5 @@ export function useTokenPrice(
       ? ((priceBNB - baseline) / baseline) * 100
       : null
 
-  return { priceBNB, priceUSD, mcapUSD, tvlUSD, stage: result.stage, changePercent }
+  return { priceBNB, mcapBNB, stage: result.stage, changePercent }
 }

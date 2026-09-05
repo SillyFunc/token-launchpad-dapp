@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Flame,
@@ -13,7 +13,6 @@ import {
 
 import boardBanner from '@/assets/images/board-banner.png'
 import { getPopularTokens, type TokenDetail } from '@/api/token'
-import { getBnbUsd } from '@/lib/pricing'
 import { useLocale } from '@/lib/i18n'
 import { TokenRow } from '@/components/board/token-row'
 import { useBoardPricing } from '@/hooks/use-board-pricing'
@@ -25,21 +24,6 @@ export const Board = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
-  const [bnbUsd, setBnbUsd] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    const fetchBnb = async () => {
-      const price = await getBnbUsd()
-      if (!cancelled && price > 0) setBnbUsd(price)
-    }
-    fetchBnb()
-    const interval = setInterval(fetchBnb, 30_000)
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [])
 
   const {
     data: tokens,
@@ -242,7 +226,6 @@ export const Board = () => {
                   key={token.id}
                   token={token}
                   locale={locale}
-                  bnbUsd={bnbUsd}
                   pricing={pricingMap[key]}
                 />
               )

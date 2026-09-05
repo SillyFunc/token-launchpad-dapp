@@ -183,7 +183,7 @@ export function TokenDetailPage() {
   const userContribution = (userContributionData as bigint | undefined) ?? 0n
 
   // ⑥ 价格行情数据 (WebSocket 实时订阅)
-  const tokenPriceData = useTokenPrice(tokenAddress || '', totalSupply, 0)
+  const tokenPriceData = useTokenPrice(tokenAddress || '', totalSupply)
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -1218,22 +1218,17 @@ export function TokenDetailPage() {
               <div className="flex flex-col gap-1 border border-[#2F3737] bg-[#181a1d] p-3">
                 <span className="text-xs text-neutral-400">当前代币单价</span>
                 <span className="font-mono text-base font-bold text-white">
-                  {tokenPriceData.priceUSD !== null
-                    ? `$${formatNumber(tokenPriceData.priceUSD, 'zh-TW')}`
+                  {tokenPriceData.priceBNB !== null
+                    ? `${formatDecimalText(tokenPriceData.priceBNB)} BNB`
                     : '--'}
                 </span>
-                {tokenPriceData.priceBNB !== null && (
-                  <span className="font-mono text-xs text-neutral-400">
-                    ≈ {formatDecimalText(tokenPriceData.priceBNB)} BNB
-                  </span>
-                )}
               </div>
 
               <div className="flex flex-col gap-1 border border-[#2F3737] bg-[#181a1d] p-3">
                 <span className="text-xs text-neutral-400">流通市值</span>
                 <span className="font-mono text-base font-bold text-[#FFA546]">
-                  {tokenPriceData.mcapUSD !== null
-                    ? `$${formatNumber(tokenPriceData.mcapUSD, 'zh-TW')}`
+                  {tokenPriceData.mcapBNB !== null
+                    ? `${formatDecimalText(tokenPriceData.mcapBNB)} BNB`
                     : '--'}
                 </span>
                 <span className="text-xs text-neutral-400">
