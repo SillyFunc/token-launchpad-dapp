@@ -18,6 +18,15 @@ export const SUPPORTED_CHAINS = [bscTestnet, bsc, mainnet] as const
 export const DEFAULT_CHAIN: Chain =
   DEFAULT_CHAIN_ID === 56 ? bsc : bscTestnet
 
+export interface ChainContracts {
+  tokenFactory: Hex
+  presaleFactory: Hex
+  coordinatorFactory: Hex
+  flapTaxTokenV3: Hex
+  wbnb: Hex
+  routerV2: Hex
+}
+
 export interface ChainMetadata {
   id: number
   name: string
@@ -33,35 +42,49 @@ export interface ChainMetadata {
     name: string
     url: string
   }
-  contracts: {
-    tokenFactory: Hex
-    presaleFactory: Hex
-    coordinatorFactory: Hex
-    flapTaxTokenV3: Hex
-    wbnb: Hex
-    routerV2: Hex
+  contracts: ChainContracts
+}
+
+/**
+ * 以 viem 内置 Chain 为链基础身份（name / nativeCurrency / 浏览器）的
+ * 单一事实源，此处只补平台差异：节点列表、UI 展示名、合约地址。
+ */
+function fromViemChain(
+  chain: Chain,
+  overrides: {
+    displayName: string
+    shortName: string
+    rpcUrls: { http: string[]; webSocket?: string[] }
+    contracts: ChainContracts
+  },
+): ChainMetadata {
+  return {
+    id: chain.id,
+    name: chain.name,
+    displayName: overrides.displayName,
+    shortName: overrides.shortName,
+    isTestnet: Boolean(chain.testnet),
+    nativeCurrency: chain.nativeCurrency,
+    rpcUrls: overrides.rpcUrls,
+    blockExplorers: {
+      name: chain.blockExplorers?.default.name ?? '',
+      url: chain.blockExplorers?.default.url ?? '',
+    },
+    contracts: overrides.contracts,
   }
 }
 
 export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
   // BSC 测试网
-  97: {
-    id: 97,
-    name: 'BNB Smart Chain Testnet',
+  97: fromViemChain(bscTestnet, {
     displayName: 'BSC 测试网 (ChainId 97)',
     shortName: 'BSC Testnet',
-    isTestnet: true,
-    nativeCurrency: { name: 'tBNB', symbol: 'tBNB', decimals: 18 },
     rpcUrls: {
       http: [
         'https://bsc-testnet-rpc.publicnode.com',
         'https://bsc-testnet-dataseed.bnbchain.org',
       ],
       webSocket: ['wss://bsc-testnet-rpc.publicnode.com'],
-    },
-    blockExplorers: {
-      name: 'BscScan Testnet',
-      url: 'https://testnet.bscscan.com',
     },
     contracts: {
       tokenFactory: '0x1d60b1Dd9df8D4fE7eE0B99D48333c06c01912CA',
@@ -71,15 +94,11 @@ export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
       wbnb: '0xae13d989daC2F0dEbFf460aC112a837C89BAa7cd',
       routerV2: '0xD99D1c33F9fC3444f8101754aBC46c52416550D1',
     },
-  },
+  }),
   // BSC 主网（待正式部署后补充实际地址）
-  56: {
-    id: 56,
-    name: 'BNB Smart Chain Mainnet',
+  56: fromViemChain(bsc, {
     displayName: 'BSC 主网 (ChainId 56)',
     shortName: 'BSC Mainnet',
-    isTestnet: false,
-    nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
     rpcUrls: {
       http: [
         'https://binance.llamarpc.com',
@@ -87,10 +106,6 @@ export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
         'https://1rpc.io/bnb',
       ],
       webSocket: ['wss://bsc-rpc.publicnode.com'],
-    },
-    blockExplorers: {
-      name: 'BscScan',
-      url: 'https://bscscan.com',
     },
     contracts: {
       // 主网部署后更新以下占位
@@ -101,8 +116,11 @@ export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
       wbnb: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
       routerV2: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
     },
-  },
+  }),
 }
+
+/** 以太坊主网仅作钱包网络支持（平台合约未部署），不进入 CHAINS_CONFIG */
+export const ETHEREUM_MAINNET_RPC = 'https://ethereum-rpc.publicnode.com'
 
 /** 获取指定或当前默认 Chain 的配置 */
 export function getChainConfig(chainId: number = DEFAULT_CHAIN_ID): ChainMetadata {
