@@ -237,3 +237,19 @@ export function getPopularTokens(config?: AxiosRequestConfig) {
     config,
   )
 }
+
+export interface SaveTokenSaltPayload {
+  contractAddress: string
+  salt: string
+  address: string
+  message: string
+  signature: string
+  txHash: string
+}
+
+export function saveTokenSalt(
+  payload: SaveTokenSaltPayload,
+  config?: AxiosRequestConfig,
+) {
+  return post('deposit/exSwap/coinIssueSetting/insertSalt', payload, config)
+}
