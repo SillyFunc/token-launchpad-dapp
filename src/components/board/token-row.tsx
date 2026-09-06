@@ -4,12 +4,27 @@ import { Coins } from 'lucide-react'
 
 import type { TokenDetail } from '@/api/token'
 import type { Locale } from '@/lib/i18n'
-import type { BoardTokenPricing } from '@/hooks/use-board-pricing'
+import type {
+  BoardStage,
+  BoardTokenPricing,
+} from '@/hooks/use-board-pricing'
 
 export interface TokenRowProps {
   token: TokenDetail
   locale: Locale
   pricing?: BoardTokenPricing
+}
+
+// docs §4.1 presaleStatus 全生命周期状态徽标（预售失败 / 待开盘为独立状态，勿并入未开盘）
+const STATUS_META: Record<BoardStage, { text: string; className: string }> = {
+  live: { text: '已开盘', className: 'bg-emerald-500/15 text-emerald-400' },
+  presale: { text: '预售中', className: 'bg-[#FFA546]/15 text-[#FFA546]' },
+  awaiting_launch: {
+    text: '待开盘',
+    className: 'bg-purple-500/15 text-purple-400',
+  },
+  failed: { text: '预售失败', className: 'bg-red-500/15 text-red-400' },
+  not_launched: { text: '未开盘', className: 'bg-neutral-800 text-neutral-400' },
 }
 
 export function TokenRow({ token, pricing }: TokenRowProps) {
@@ -30,12 +45,7 @@ export function TokenRow({ token, pricing }: TokenRowProps) {
       ? '低流动性'
       : null
 
-  const statusMeta =
-    stage === 'live'
-      ? { text: '已开盘', className: 'bg-emerald-500/15 text-emerald-400' }
-      : stage === 'presale'
-        ? { text: '预售中', className: 'bg-[#FFA546]/15 text-[#FFA546]' }
-        : { text: '未开盘', className: 'bg-neutral-800 text-neutral-400' }
+  const statusMeta = STATUS_META[stage]
 
   const isPositive = changePercent !== null && changePercent >= 0
   const changeText =

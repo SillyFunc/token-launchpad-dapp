@@ -20,7 +20,12 @@ import {
   tokenAbi,
 } from '@/lib/pricing'
 
-export type BoardStage = 'live' | 'presale' | 'not_launched'
+export type BoardStage =
+  | 'live'
+  | 'presale'
+  | 'awaiting_launch'
+  | 'failed'
+  | 'not_launched'
 
 export interface BoardTokenPricing {
   totalSupply: bigint | undefined
@@ -252,13 +257,14 @@ export function useBoardPricing(
         continue
       }
 
-      // 未领取 + 已配置/已开启预售（配置待开启 / 认购中 / 认购结束待开盘）→ 预售中
+      // 未领取 + 已配置/已开启预售：配置待开启 / 认购中 → 预售中；认购结束（达软顶，72h 开盘窗口内）→ 待开盘
+      // docs §5.1：presaleStatus 0/1/2 期间池子无流动性，统一按固定认购价展示
       if (launchEnabled && launchStep >= 0 && launchStep <= 2) {
         map[s.key] = {
           baselinePriceBNB: null,
           pricing: {
             totalSupply: s.totalSupply,
-            stage: 'presale',
+            stage: launchStep === 2 ? 'awaiting_launch' : 'presale',
             priceBNB: s.presalePrice
               ? Number(formatUnits(s.presalePrice, 18))
               : null,
@@ -266,9 +272,25 @@ export function useBoardPricing(
             changePercent: null,
           },
         }
+        continue
       }
 
-      // 其余（未领取 + 未开启预售 / 配置未开启 / 预售失败未领取）→ 未开盘
+      // 未领取 + 发行失败（status 4：退款 / 回收 / 重开窗口）→ 预售失败
+      // 失败后 launch 通道永久关闭、accumulatedBNB 随退款递减，固定认购价已无展示意义
+      if (launchEnabled && launchStep === 4) {
+        map[s.key] = {
+          baselinePriceBNB: null,
+          pricing: {
+            totalSupply: s.totalSupply,
+            stage: 'failed',
+            priceBNB: null,
+            bnbReserve: null,
+            changePercent: null,
+          },
+        }
+      }
+
+      // 其余（未领取 + 未开启预售 / 配置未开启）→ 未开盘
     }
 
     // 已开盘：pair 储备计价，预售发行价作为涨幅基准
