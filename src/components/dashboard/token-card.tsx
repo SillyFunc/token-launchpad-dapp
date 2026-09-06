@@ -718,8 +718,8 @@ export function TokenCard({
         </CardContent>
       </div>
 
-      {/* 底部操作区：由单一状态机 stage 精准分流渲染 */}
-      <CardFooter className="flex items-center justify-end gap-2 border-t border-[#2F3737] bg-[#16181a] p-3">
+      {/* 底部操作区：由单一状态机 stage 精准分流渲染，按钮纵向通栏、一行一个 */}
+      <CardFooter className="flex w-full flex-col items-stretch gap-2 border-t border-[#2F3737] bg-[#16181a] p-3">
         {(() => {
           switch (stage) {
             case 'draft':
