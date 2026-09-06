@@ -8,7 +8,7 @@ import { ArrowRight } from 'lucide-react'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
 import { TaxSlider } from '@/components/common/tax-slider'
-import { NumericInput } from '@/components/common/numeric-keypad'
+import { FieldInfo } from '@/components/common/field-info'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 import { toast } from '@/components/ui/toast'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
@@ -54,6 +54,10 @@ const antiFarmerDurationSchema = z
     const n = Number(v)
     return v !== '' && Number.isInteger(n) && n >= 0 && n <= 365
   }, '请输入 0-365 之间的整数')
+
+// 天数输入清洗：仅保留数字、去前导零；最多 3 位对应 365 上限
+const sanitizeDaysInput = (raw: string) =>
+  raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 3)
 
 const evmAddressSchema = z
   .string()
@@ -493,37 +497,29 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                 onChange: taxDurationSchema,
               }}
             >
-              {(field) => {
-                const errorMsg = field.state.meta.errors
-                  .map((e) =>
-                    typeof e === 'string'
-                      ? e
-                      : (e as { message?: unknown }).message,
-                  )
-                  .filter((m): m is string => typeof m === 'string')
-                  .join(', ')
-                return (
-                  <div className="flex flex-col mt-4">
-                    <NumericInput
+              {(field) => (
+                <div className="flex flex-col mt-4">
+                  <div className="relative">
+                    <input
                       id={field.name}
                       name={field.name}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
                       value={field.state.value}
-                      onChange={field.handleChange}
                       onBlur={field.handleBlur}
-                      title="设置收税时长"
-                      description="税费生效的总天数，期满后买卖税率永久归零"
-                      unit="天"
-                      min={1}
-                      max={365}
+                      onChange={(e) =>
+                        field.handleChange(sanitizeDaysInput(e.target.value))
+                      }
+                      className="w-full h-10.5 pl-3 pr-10 text-sm border border-[#84888c] bg-transparent rounded-xs text-white focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                     />
-                    {errorMsg && (
-                      <p className="self-stretch text-xs text-red-500 mt-1">
-                        {errorMsg}
-                      </p>
-                    )}
+                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-[#FE810B]">
+                      天
+                    </span>
                   </div>
-                )
-              }}
+                  <FieldInfo field={field} />
+                </div>
+              )}
             </form.Field>
             <p className="text-xs text-[#84888c] mt-2">
               收税时长是指代币交易税费生效的总天数。期满后，代币的买入与卖出税率将永久归零。
@@ -536,37 +532,24 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
               name="feeRecipient"
               validators={{ onChange: evmAddressSchema }}
             >
-              {(field) => {
-                const errorMsg = field.state.meta.errors
-                  .map((e) =>
-                    typeof e === 'string'
-                      ? e
-                      : (e as { message?: unknown }).message,
-                  )
-                  .filter((m): m is string => typeof m === 'string')
-                  .join(', ')
-
-                return (
-                  <div className="flex flex-col">
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      aria-label="税费接收地址"
-                      placeholder=""
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
-                    />
-                    {errorMsg && (
-                      <p className="text-xs text-red-500 mt-1">{errorMsg}</p>
-                    )}
-                  </div>
-                )
-              }}
+              {(field) => (
+                <div className="flex flex-col">
+                  <input
+                    id={field.name}
+                    name={field.name}
+                    type="text"
+                    aria-label="税费接收地址"
+                    placeholder=""
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
+                  />
+                  <FieldInfo field={field} />
+                </div>
+              )}
             </form.Field>
           </div>
 
@@ -598,37 +581,29 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                 },
               }}
             >
-              {(field) => {
-                const errorMsg = field.state.meta.errors
-                  .map((e) =>
-                    typeof e === 'string'
-                      ? e
-                      : (e as unknown as { message?: unknown }).message,
-                  )
-                  .filter((m): m is string => typeof m === 'string')
-                  .join(', ')
-                return (
-                  <div className="flex flex-col mt-4">
-                    <NumericInput
+              {(field) => (
+                <div className="flex flex-col mt-4">
+                  <div className="relative">
+                    <input
                       id={field.name}
                       name={field.name}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
                       value={field.state.value}
-                      onChange={field.handleChange}
                       onBlur={field.handleBlur}
-                      title="设置防「挖、提、卖」保护期"
-                      description="保护期内禁止向部分 V3 池添加流动性，设为 0 天则不启用"
-                      unit="天"
-                      min={0}
-                      max={365}
+                      onChange={(e) =>
+                        field.handleChange(sanitizeDaysInput(e.target.value))
+                      }
+                      className="w-full h-10.5 pl-3 pr-10 text-sm border border-[#84888c] bg-transparent rounded-xs text-white focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                     />
-                    {errorMsg && (
-                      <p className="self-stretch text-xs text-red-500 mt-1">
-                        {errorMsg}
-                      </p>
-                    )}
+                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-[#FE810B]">
+                      天
+                    </span>
                   </div>
-                )
-              }}
+                  <FieldInfo field={field} />
+                </div>
+              )}
             </form.Field>
             <p className="text-xs text-[#84888c] mt-2">
               在防「挖、提、卖」保护期内，用户将无法向部分 V3
