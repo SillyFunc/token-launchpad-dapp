@@ -16,13 +16,14 @@ const config = createConfig({
     }),
   ],
   transports: {
+    // HTTP 节点在前（请求/读数更快，无需握手），WS 殿后作为事件订阅备选
     [97]: fallback([
-      ...(CHAINS_CONFIG[97].rpcUrls.webSocket || []).map((url) => webSocket(url)),
       ...CHAINS_CONFIG[97].rpcUrls.http.map((url) => http(url)),
+      ...(CHAINS_CONFIG[97].rpcUrls.webSocket || []).map((url) => webSocket(url)),
     ]),
     [56]: fallback([
-      ...(CHAINS_CONFIG[56].rpcUrls.webSocket || []).map((url) => webSocket(url)),
       ...CHAINS_CONFIG[56].rpcUrls.http.map((url) => http(url)),
+      ...(CHAINS_CONFIG[56].rpcUrls.webSocket || []).map((url) => webSocket(url)),
     ]),
     // 以太坊主网（SUPPORTED_CHAINS 已启用，仅作钱包网络支持，平台合约暂未部署）
     [mainnet.id]: http('https://ethereum-rpc.publicnode.com'),

@@ -54,9 +54,8 @@ export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
     nativeCurrency: { name: 'tBNB', symbol: 'tBNB', decimals: 18 },
     rpcUrls: {
       http: [
-        'https://bsc-testnet-dataseed.bnbchain.org',
-        'https://data-seed-prebsc-1-s1.binance.org:8545/',
         'https://bsc-testnet-rpc.publicnode.com',
+        'https://bsc-testnet-dataseed.bnbchain.org',
       ],
       webSocket: ['wss://bsc-testnet-rpc.publicnode.com'],
     },

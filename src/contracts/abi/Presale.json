@@ -660,6 +660,13 @@
   },
   {
     "type": "function",
+    "name": "setCustodyMode",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setPresaleTerms",
     "inputs": [
       {
@@ -1635,6 +1642,11 @@
   {
     "type": "error",
     "name": "RefundsOutstanding",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SharesLocked",
     "inputs": []
   },
   {
