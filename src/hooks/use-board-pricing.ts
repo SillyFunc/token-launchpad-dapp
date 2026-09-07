@@ -236,13 +236,13 @@ export function useBoardPricing(
 
     // 预售期：lp 未添加，且 getLaunchStatus 为 enabled 且 status < 3 时用发行价展示
     for (const s of pairStates) {
-      // 已领取：托管仓标志，或代币 state >= 2（reclaimTokens 领取只迁 state，不改标志）
+      // 已领取：托管仓标志，或代币 state >= 2（领取即上线；2026-09-08 失败局已无领取出口，state 不会到 2）
       const claimed =
         s.launchStatus?.[5] === true || (s.tokenState ?? 0) >= 2
       const launchEnabled = s.launchStatus?.[0] === true
       const launchStep = s.launchStatus ? Number(s.launchStatus[1]) : -1
 
-      // 已领取（从未开过预售，或开过预售但失败后放弃领取）→ 已开盘
+      // 已领取（纯发币模式领取完成）→ 已开盘
       if (claimed) {
         map[s.key] = {
           baselinePriceBNB: null,

@@ -5,6 +5,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   writeContract,
   readContract,
+  simulateContract,
+  getPublicClient,
   waitForTransactionReceipt,
 } from '@wagmi/core'
 import { isAddress, zeroAddress, type Hex } from 'viem'
@@ -61,7 +63,7 @@ export function OpenPresaleModal({
 
   const tokenAddress = token.coinContractAddress || ''
 
-  const handleExecute = async () => {
+  const handleExecute = async (account: Hex) => {
     setIsExecuting(true)
     try {
       const coordinator =
@@ -115,12 +117,37 @@ export function OpenPresaleModal({
         return
       }
 
-      // 直接调用 presale.openPresale() 开启认购
+      // 先用与最终交易相同的钱包地址模拟，避免 TokenPocket 使用错误 from 导致泛化的预估失败提示。
+      // 模拟成功后再发送交易，模拟失败则直接展示合约真实 revert 原因。
+      await simulateContract(config, {
+        address: escrow,
+        abi: PresaleAbi,
+        functionName: 'openPresale',
+        account,
+        chainId: DEFAULT_CHAIN_ID,
+      })
+
+      // 使用公共 RPC 估算并加 20% 缓冲，减少 TokenPocket 自身 eth_estimateGas
+      // 兼容性问题。模拟已成功，因此这里失败只会影响 gas 估算，不改变业务判断。
+      const publicClient = getPublicClient(config, { chainId: DEFAULT_CHAIN_ID })
+      const estimatedGas = publicClient
+        ? await publicClient.estimateContractGas({
+            address: escrow,
+            abi: PresaleAbi,
+            functionName: 'openPresale',
+            account,
+          })
+        : undefined
+      const gas = estimatedGas ? (estimatedGas * 120n) / 100n : undefined
+
+      // 直接调用 presale.openPresale() 开启认购；显式传入模拟时使用的同一账户。
       const openHash = await writeContract(config, {
         address: escrow,
         abi: PresaleAbi,
         functionName: 'openPresale',
+        account,
         chainId: DEFAULT_CHAIN_ID,
+        ...(gas ? { gas } : {}),
       })
       await waitForTransactionReceipt(config, {
         hash: openHash,

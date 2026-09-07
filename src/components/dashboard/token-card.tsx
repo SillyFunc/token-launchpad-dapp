@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConfig, useConnection, useReadContract } from 'wagmi'
+import { useConfig, useReadContract } from 'wagmi'
+import { useNavigate } from 'react-router'
 import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
 import { formatEther, type Hex } from 'viem'
 import {
@@ -128,21 +129,17 @@ export function TokenCard({
   onClaim,
 }: TokenCardProps) {
   const { locale } = useLocale()
+  const navigate = useNavigate()
   const config = useConfig()
   const queryClient = useQueryClient()
-  const { address: walletAddress, connector: walletConnector } = useConnection()
   const [copied, setCopied] = useState(false)
   const [isClaiming, setIsClaiming] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [isEndConfirmOpen, setIsEndConfirmOpen] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
-  const [isAbandoning, setIsAbandoning] = useState(false)
-  const [isReclaimConfirmOpen, setIsReclaimConfirmOpen] = useState(false)
-  const [creatorBuyWithdrawn, setCreatorBuyWithdrawn] = useState(false)
 
   // 统一代币门禁守卫
   const {
-    isCreator,
     isIssued,
     isChainLoading,
     presaleAddress,
@@ -164,7 +161,6 @@ export function TokenCard({
     canSetupPresale,
     canEndPresale,
     canLaunch,
-    creatorBuyBnb,
   } = useTokenGate({ token })
 
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
@@ -309,77 +305,6 @@ export function TokenCard({
     } finally {
       setIsEnding(false)
       setIsEndConfirmOpen(false)
-    }
-  }
-
-  // 预检：连接账户有效性 + 创建者身份（reclaim/relaunch 均仅创建者可调用；
-  // 账户不一致或非创建者时，钱包预估交易会直接报「预估失败」）
-  const ensureFailedActionAllowed = async (): Promise<boolean> => {
-    if (!isCreator) {
-      toast.error('仅代币创建者可执行此操作', '权限不足')
-      return false
-    }
-    if (walletConnector && walletAddress) {
-      try {
-        const accounts = await walletConnector.getAccounts()
-        if (
-          !accounts.some((a) => a.toLowerCase() === walletAddress.toLowerCase())
-        ) {
-          toast.error(
-            '钱包当前账户与连接账户不一致，请切回该账户或重新连接钱包',
-            '账户不一致',
-          )
-          return false
-        }
-      } catch {
-        // 预检失败不阻断，交由钱包在签名环节给出错误
-      }
-    }
-    return true
-  }
-
-  // 预售失败出口：领取代币，放弃本次预售（不可再重开）。
-  // 若配置过创建者购买注资，先自动提取注资，成功后接着领取代币（一次点击，顺序两笔交易）
-  const handleReclaimTokens = async () => {
-    if (!presaleAddress) return
-    if (!(await ensureFailedActionAllowed())) return
-
-    setIsAbandoning(true)
-    try {
-      if (creatorBuyBnb > 0n && !creatorBuyWithdrawn) {
-        const withdrawHash = await writeContract(config, {
-          address: presaleAddress,
-          abi: PresaleAbi,
-          functionName: 'withdrawCreatorBuy',
-          chainId: DEFAULT_CHAIN_ID,
-        })
-        await waitForTransactionReceipt(config, {
-          hash: withdrawHash,
-          chainId: DEFAULT_CHAIN_ID,
-        })
-        setCreatorBuyWithdrawn(true)
-        toast.success(
-          `创建者注资已提取！${formatDecimalText(Number(formatEther(creatorBuyBnb)))} BNB 已原路退回`,
-        )
-      }
-
-      const reclaimHash = await writeContract(config, {
-        address: presaleAddress,
-        abi: PresaleAbi,
-        functionName: 'reclaimTokens',
-        chainId: DEFAULT_CHAIN_ID,
-      })
-      await waitForTransactionReceipt(config, {
-        hash: reclaimHash,
-        chainId: DEFAULT_CHAIN_ID,
-      })
-      queryClient.invalidateQueries()
-      toast.success('代币已全部领取！本次预售已放弃，可自行添加流动性开盘交易')
-    } catch (err: unknown) {
-      toast.error(parseContractError(err, '操作失败，请稍后重试'), '操作失败')
-    } finally {
-      setIsAbandoning(false)
-      setIsReclaimConfirmOpen(false)
     }
   }
 
@@ -857,20 +782,34 @@ export function TokenCard({
                         预售失败
                       </span>
                       <span className="text-xs leading-relaxed text-neutral-400">
-                        本次认购未达到软顶要求或超时未完成开盘，预售已终止，代币暂未上线，本轮认购者可申请退款。领取代币即放弃本次预售。
+                        本次认购未达到软顶要求或超时未完成开盘，预售已终止。本轮认购者可随时申请退款；全部退款完成后即可重开新一轮预售。
                       </span>
                     </div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-neutral-400">未退款金额：</span>
+                    <span className="font-mono font-medium text-[#FFA546]">
+                      {formatDecimalText(Number(formatEther(bnbAccumulated)))}{' '}
+                      BNB
+                    </span>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
                     size="default"
-                    onClick={() => setIsReclaimConfirmOpen(true)}
-                    disabled={isAbandoning}
-                    className="rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-white/10"
+                    onClick={() => {
+                      if (bnbAccumulated > 0n) {
+                        toast.warning('等待全部认购者退款后才能重开预售')
+                        return
+                      }
+                      navigate(`/represale?id=${token.id}&address=${tokenAddress}`)
+                    }}
+                    disabled={bnbAccumulated > 0n}
+                    title={bnbAccumulated > 0n ? '等待全部认购者退款' : undefined}
+                    className="rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-white/10 disabled:opacity-40"
                   >
-                    <Gift className="size-4" />
-                    <span>领取代币 (放弃预售)</span>
+                    <Rocket className="size-4" />
+                    <span>重开预售</span>
                   </Button>
                 </div>
               )
@@ -956,62 +895,6 @@ export function TokenCard({
                 </>
               ) : (
                 <span>确认结束</span>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 领取代币（放弃预售）确认弹窗 */}
-      <Dialog
-        open={isReclaimConfirmOpen}
-        onOpenChange={(open) => !open && setIsReclaimConfirmOpen(false)}
-      >
-        <DialogContent className="max-w-md border border-[#484b51] bg-[#131516] p-0 text-white">
-          <DialogHeader className="px-5 pt-5">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="size-4 text-amber-400" />
-              <DialogTitle className="text-base font-bold text-white">
-                领取代币（放弃预售）？
-              </DialogTitle>
-            </div>
-            <DialogDescription className="mt-1.5 text-xs leading-relaxed text-neutral-400">
-              将把托管仓内的全部代币领取到你的钱包，本次预售永久放弃（不可再重开）。领取后代币即上线，可自行添加流动性交易。
-              {creatorBuyBnb > 0n && !creatorBuyWithdrawn &&
-                ' 确认后将自动提取创建者注资，再领取代币（共两笔交易）。'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="px-5">
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>注意：放弃后不可撤销，本轮认购者仍可按原路申请退款。</span>
-            </div>
-          </div>
-          <DialogFooter className="flex flex-row items-center justify-end gap-2 px-5 pb-5 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isAbandoning}
-              onClick={() => setIsReclaimConfirmOpen(false)}
-              className="rounded border-[#484b51] bg-[#1a1c1e] text-xs text-neutral-300 hover:bg-[#25282c]"
-            >
-              取消
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={isAbandoning}
-              onClick={handleReclaimTokens}
-              className="flex items-center gap-1.5 rounded border border-white/40 bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-xs font-bold text-white shadow-[0_2px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-            >
-              {isAbandoning ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  <span>处理中…</span>
-                </>
-              ) : (
-                <span>确认领取</span>
               )}
             </Button>
           </DialogFooter>

@@ -560,7 +560,8 @@ export function TokenDetailPage() {
   }
 
   // 是否开启了预售（严格以链上 presaleEnabled 为准）
-  // 预售失败后领取代币（reclaim 只迁 token.state >= 2，状态码停在 4）→ 纯发币模式开盘，走 DEX 交易视图
+  // isReclaimedAfterFailed 为旧合约遗留判定（reclaimTokens 已于 2026-09-08 移除，
+  // 失败局 token.state 恒为 0，该条件不可达；保留作防御）
   const isReclaimedAfterFailed = presaleStatus === 4 && (tokenState ?? 0) >= 2
   const hasPresale = Boolean(
     isIssued && presaleEnabled && !isReclaimedAfterFailed,

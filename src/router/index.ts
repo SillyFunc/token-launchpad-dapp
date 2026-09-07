@@ -6,6 +6,7 @@ import { Prelaunch } from '../pages/prelaunch'
 import { Me } from '../pages/me'
 import { Dashboard } from '@/pages/dashboard'
 import { Presale } from '@/pages/presale'
+import { Represale } from '@/pages/represale'
 import { TokenDetailPage } from '@/pages/token-detail'
 
 export const router = createHashRouter([
@@ -40,6 +41,10 @@ export const router = createHashRouter([
       {
         path: 'presale',
         Component: Presale,
+      },
+      {
+        path: 'represale',
+        Component: Represale,
       },
       {
         path: 'token/:address',

@@ -53,7 +53,8 @@ export function resolveTokenStage(g: {
   presaleStatus?: number
   isSoftCapReached: boolean
 }): TokenCardStage {
-  // 领取/开盘完成的合并判定：reclaimTokens 只迁 token.state，不改托管仓标志
+  // 领取/开盘完成的合并判定（2026-09-08 合约已移除 reclaimTokens：失败局无领取出口，
+  // state >= 2 仅由 claimAllTokens / launch 触发）
   const claimed = g.tokensClaimed || (g.tokenState ?? 0) >= 2
   if (!g.isIssued) return 'draft'
   if (g.isChainLoading) return 'syncing'
@@ -206,8 +207,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         chainId: DEFAULT_CHAIN_ID,
       },
       {
-        // 代币自身状态：>= 2 表示已上线（领取/开盘完成），reclaimTokens 不改托管仓
-        // 的 presaleStatus/tokensClaimed，必须以此为准（docs §7.1）
+        // 代币自身状态：>= 2 表示已上线（领取/开盘完成）；失败局无领取出口，
+        // state 不会变化，状态展示以这里的 tokenState 为准（docs §7.1）
         address: queryTokenAddress,
         abi: FlapTaxTokenV3Abi,
         functionName: 'state',
