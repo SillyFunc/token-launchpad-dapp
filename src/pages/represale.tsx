@@ -84,7 +84,6 @@ export function Represale() {
             <RepresaleForm
               key={`${effectiveAddress}-${gate.presaleAddress}`}
               token={token ?? null}
-              tokenAddress={effectiveAddress || ''}
               presaleAddress={gate.presaleAddress}
               address={address as Hex}
               gate={gate}

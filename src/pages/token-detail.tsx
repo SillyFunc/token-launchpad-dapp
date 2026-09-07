@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection, useConfig, useReadContract, useBalance } from 'wagmi'
@@ -113,6 +113,7 @@ export function TokenDetailPage() {
     vestingRate,
     onchainPresalePrice,
     onchainMaxBuy,
+    presaleStartTime,
     presaleEndTime,
     tokenState,
   } = useTokenGate({
@@ -287,10 +288,37 @@ export function TokenDetailPage() {
     inputBnbNum > remainingMaxBnbQuota + 0.0001
 
   // 认购窗口已过但链上仍是认购中（status 1）：任何人可触发 endPresale
+  const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000))
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowSeconds(Math.floor(Date.now() / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const startTimeSeconds = Number(presaleStartTime ?? 0n)
+  const endTimeSeconds = Number(presaleEndTime ?? 0n)
+  const isPresaleNotStarted =
+    presaleStatus === 1 && startTimeSeconds > 0 && nowSeconds < startTimeSeconds
   const isPresaleWindowOver =
-    presaleStatus === 1 &&
-    presaleEndTime !== undefined &&
-    Date.now() / 1000 >= Number(presaleEndTime)
+    presaleStatus === 1 && endTimeSeconds > 0 && nowSeconds >= endTimeSeconds
+  const isPresaleActive =
+    presaleStatus === 1 && !isPresaleNotStarted && !isPresaleWindowOver
+  const countdownSeconds = isPresaleNotStarted
+    ? Math.max(0, startTimeSeconds - nowSeconds)
+    : Math.max(0, endTimeSeconds - nowSeconds)
+
+  const formatCountdown = (seconds: number) => {
+    const days = Math.floor(seconds / 86400)
+    const hours = Math.floor((seconds % 86400) / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const remaining = seconds % 60
+    const clock = [hours, minutes, remaining]
+      .map((part) => String(part).padStart(2, '0'))
+      .join(':')
+    return days > 0 ? `${days}天 ${clock}` : clock
+  }
 
   // 快捷百分比填入（基于综合可用上限，去除末尾冗余的 0）
   const handlePercentClick = (percent: number) => {
@@ -307,6 +335,14 @@ export function TokenDetailPage() {
 
     if (presaleStatus !== 1) {
       toast.error('预售当前未在认购中')
+      return
+    }
+    if (isPresaleNotStarted) {
+      toast.error(`预售尚未开始，距离开始还有 ${formatCountdown(countdownSeconds)}`)
+      return
+    }
+    if (isPresaleWindowOver) {
+      toast.error('预售认购窗口已结束')
       return
     }
 
@@ -884,6 +920,75 @@ export function TokenDetailPage() {
                     </p>
                   </div>
                 </>
+              ) : presaleStatus === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-3 text-center">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-white/5 text-neutral-400">
+                    <Clock className="size-6" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-base font-bold text-white">
+                      预售待开启
+                    </span>
+                    <span className="text-xs leading-relaxed text-neutral-400">
+                      创建者尚未开启预售，认购通道暂未开放。
+                    </span>
+                  </div>
+                </div>
+              ) : presaleStatus === 2 ? (
+                <div className="flex flex-col items-center gap-3 py-3 text-center">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-purple-400/10 text-purple-300">
+                    <Clock className="size-6" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-base font-bold text-white">
+                      认购已结束 · 待开盘
+                    </span>
+                    <span className="text-xs leading-relaxed text-neutral-400">
+                      认购窗口已关闭，创建者正在准备开盘加池，当前不可继续认购。
+                    </span>
+                  </div>
+                </div>
+              ) : presaleStatus === 3 ? (
+                <div className="flex flex-col items-center gap-3 py-3 text-center">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-emerald-400/10 text-emerald-300">
+                    <Check className="size-6" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-base font-bold text-white">
+                      预售已开盘
+                    </span>
+                    <span className="text-xs leading-relaxed text-neutral-400">
+                      认购已结束，代币已完成开盘。请前往“解锁”页查看可领取份额。
+                    </span>
+                  </div>
+                </div>
+              ) : isPresaleNotStarted ? (
+                <div className="flex flex-col items-center gap-4 py-3 text-center">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-amber-400/10 text-amber-300">
+                    <Clock className="size-7" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-base font-bold tracking-wide text-white">
+                      预售即将开始
+                    </span>
+                    <span className="text-xs leading-relaxed text-neutral-400">
+                      认购通道尚未开放，请在开始时间后参与预售。
+                    </span>
+                  </div>
+                  <div className="flex w-full flex-col items-center gap-1 px-4 py-2">
+                    <span className="text-[11px] uppercase tracking-widest text-amber-300/70">
+                      距离开始
+                    </span>
+                    <strong className="font-mono text-xl font-bold tracking-tight text-[#FFA546]">
+                      {formatCountdown(countdownSeconds)}
+                    </strong>
+                  </div>
+                  {startTimeSeconds > 0 && (
+                    <span className="relative text-xs text-neutral-500">
+                      开始时间：{new Date(startTimeSeconds * 1000).toLocaleString('zh-CN')}
+                    </span>
+                  )}
+                </div>
               ) : (
                 <>
                   {/* 预售售罄进度条 (Binding Curve Percentage) */}
@@ -1014,8 +1119,26 @@ export function TokenDetailPage() {
                     <>
                       {/* 认购输入与余额区 */}
                       <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
+                        <div
+                          className={cn(
+                            'flex items-center justify-between rounded border p-2.5 text-xs',
+                            isPresaleNotStarted
+                              ? 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+                              : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
+                          )}
+                        >
+                          <span>
+                            {isPresaleNotStarted ? '预售尚未开始' : '预售认购中'}
+                          </span>
+                          <strong className="font-mono">
+                            {isPresaleNotStarted ? '距离开始：' : '距离结束：'}
+                            {formatCountdown(countdownSeconds)}
+                          </strong>
+                        </div>
                         <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-white">参与预售</span>
+                            <span className="font-bold text-white">
+                              {isPresaleNotStarted ? '预售尚未开始' : '参与预售'}
+                            </span>
                           <div className="flex items-center gap-2.5 text-neutral-400">
                             {remainingMaxBnbQuota !== null && (
                               <span>
@@ -1046,13 +1169,14 @@ export function TokenDetailPage() {
                             inputMode="decimal"
                             placeholder=""
                             value={subscribeAmount}
+                            disabled={!isPresaleActive}
                             onChange={(e) => {
                               const val = e.target.value
                               if (val === '' || /^\d*\.?\d*$/.test(val)) {
                                 setSubscribeAmount(val)
                               }
                             }}
-                            className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-600 focus:outline-none"
+                            className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                           />
                           <span className="ml-2 font-mono text-xs font-bold text-[#FFA546] select-none">
                             BNB
@@ -1072,7 +1196,8 @@ export function TokenDetailPage() {
                               key={percent}
                               type="button"
                               onClick={() => handlePercentClick(percent)}
-                              className="flex h-8 cursor-pointer items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none active:scale-95 hover:border-[#FE810B] hover:text-[#FFA546]"
+                              disabled={!isPresaleActive}
+                              className="flex h-8 cursor-pointer items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none active:scale-95 hover:border-[#FE810B] hover:text-[#FFA546] disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {percent}%
                             </button>
@@ -1099,7 +1224,7 @@ export function TokenDetailPage() {
                         onAction={handleSubscribe}
                         loading={isSubscribing}
                         loadingText="认购处理中…"
-                        disabled={presaleStatus !== 1 || isOverWalletLimit}
+                        disabled={!isPresaleActive || isOverWalletLimit}
                         className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
                       >
                         <span>

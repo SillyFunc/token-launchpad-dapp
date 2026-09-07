@@ -129,6 +129,7 @@ export interface TokenGateResult {
   vestingRate: bigint
   onchainPresalePrice: bigint
   onchainMaxBuy: bigint
+  presaleStartTime?: bigint
   presaleEndTime?: bigint
   creatorBuyBnb: bigint
 
@@ -313,6 +314,12 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       {
         address: queryPresaleAddress,
         abi: PresaleAbi,
+        functionName: 'startTime',
+        chainId: DEFAULT_CHAIN_ID,
+      },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
         functionName: 'endTime',
         chainId: DEFAULT_CHAIN_ID,
       },
@@ -338,9 +345,11 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const rawVestingRate = (presaleBatch?.[6]?.result as bigint | undefined) ?? 0n
   const rawPresalePrice = (presaleBatch?.[7]?.result as bigint | undefined) ?? 0n
   const rawMaxBuy = (presaleBatch?.[8]?.result as bigint | undefined) ?? 0n
-  const rawEndTime = (presaleBatch?.[9]?.result as bigint | undefined) ?? 0n
+  const rawStartTime = (presaleBatch?.[9]?.result as bigint | undefined) ?? 0n
+  const rawEndTime = (presaleBatch?.[10]?.result as bigint | undefined) ?? 0n
+  const presaleStartTime = rawStartTime > 0n ? rawStartTime : undefined
   const presaleEndTime = rawEndTime > 0n ? rawEndTime : undefined
-  const creatorBuyBnb = (presaleBatch?.[10]?.result as bigint | undefined) ?? 0n
+  const creatorBuyBnb = (presaleBatch?.[11]?.result as bigint | undefined) ?? 0n
 
   // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
@@ -675,6 +684,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     vestingRate,
     onchainPresalePrice,
     onchainMaxBuy,
+    presaleStartTime,
     presaleEndTime,
     creatorBuyBnb,
     canEdit,
