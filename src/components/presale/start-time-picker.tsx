@@ -207,7 +207,7 @@ export function StartTimePicker({
           )}
         >
           <Zap className="size-3.5" />
-          <span>立即开始 (创建后开放)</span>
+          <span>立即开始</span>
         </button>
 
         <button
@@ -222,7 +222,7 @@ export function StartTimePicker({
           )}
         >
           <Timer className="size-3.5" />
-          <span>定时开始 (指定时间)</span>
+          <span>定时开始</span>
         </button>
       </div>
 

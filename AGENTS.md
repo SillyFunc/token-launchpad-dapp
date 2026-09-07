@@ -9,11 +9,6 @@
 + 发现 Bug 时，先思考为什么测试没有覆盖，再写最小测试稳定复现并确认失败；然后修复根因，最后执行与改动范围匹配的回归验证。无法自动化复现时，保留可重复的最小验证步骤。测试有维护成本，应围绕风险与边界保持必要且精简。
 + 没有任何东西是绝对的，如果你认为这份指南需要优化，可以随时告诉我，我很乐意一起优化它。
 
-## Onboarding (run this at the start of every new session)
-
-1. `bun run sync-abis` — Sync compiled ABIs from the contracts repo + frontend integration docs
-2. Read `docs/frontend-integration.md` — Understand contract architecture, business flow, parameters, state machines, and pricing
-
 ## Commands
 
 - `bun run dev` - Start the dev server

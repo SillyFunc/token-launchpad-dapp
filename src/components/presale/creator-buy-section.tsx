@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useBalance } from 'wagmi'
 import { formatUnits } from 'viem'
-import { ArrowLeftRight, Coins, Info, Lock } from 'lucide-react'
+import { ArrowLeftRight, Coins, Info } from 'lucide-react'
 
 import bnbIcon from '@/assets/bnb-icon.svg'
 import { DEFAULT_CHAIN_ID } from '@/config/network'
@@ -10,12 +10,16 @@ import { FormSectionTitle } from '@/components/common/form-section-title'
 
 export interface CreatorBuySectionProps {
   address: `0x${string}`
-  presaleTokenPrice: string // 每 1 枚代币的 BNB 价格 (如 0.001)
+  /** 开盘池价（BNB/枚 = 硬顶 / 池份额），仅用于换算预估；未填硬顶时为 0，输入不受限 */
+  poolTokenPriceBnb?: number
   creatorBuyBnb: string
   creatorBuyTokens: string
   onChangeBnb: (val: string) => void
   onChangeTokens: (val: string) => void
-  maxBuyBnb?: number
+  /** BNB 注资口径上限 = 开盘池 BNB（≈硬顶）的 1/3 */
+  maxCreatorBuyBnb?: number
+  /** 代币口径上限 = 开盘池代币份额的 25%（合约常量 MAX_CREATOR_BUY_POOL_BPS = 2500） */
+  maxCreatorBuyTokens?: number
   error?: string
 }
 
@@ -26,12 +30,13 @@ function formatCleanNumber(num: number, maxDecimals = 6): string {
 
 export function CreatorBuySection({
   address,
-  presaleTokenPrice,
+  poolTokenPriceBnb,
   creatorBuyBnb,
   creatorBuyTokens,
   onChangeBnb,
   onChangeTokens,
-  maxBuyBnb,
+  maxCreatorBuyBnb,
+  maxCreatorBuyTokens,
   error,
 }: CreatorBuySectionProps) {
   const hasTokens = Number(creatorBuyTokens) > 0
@@ -72,8 +77,8 @@ export function CreatorBuySection({
   // 格式化展示余额 (保留4位小数)
   const formattedBalance = rawBalanceNum.toFixed(4)
 
-  const priceNum = Number(presaleTokenPrice) || 0
-  const isPriceValid = priceNum > 0
+  // 开盘池价（BNB/枚），仅用于 BNB↔代币换算预估；为 0 时输入仍可用，预估显示 --
+  const poolPriceNum = poolTokenPriceBnb ?? 0
 
   // 同步外部表单初值（仅在首次从异步接口拉到数据时做一次性回填）
   useEffect(() => {
@@ -95,14 +100,13 @@ export function CreatorBuySection({
 
   // 切换模式时的同步
   const handleToggleMode = () => {
-    if (!isPriceValid) return
     hasSyncedInitialRef.current = true
 
     if (mode === 'BNB') {
-      // 切换到代币模式：根据当前输入的 BNB 换算预估代币数
+      // 切换到代币模式：有池价时按池价换算预估代币数，无池价则清空待填
       const bnbNum = Number(inputValue) || 0
-      if (bnbNum > 0 && priceNum > 0) {
-        const tokens = formatCleanNumber(bnbNum / priceNum, 4)
+      if (bnbNum > 0 && poolPriceNum > 0) {
+        const tokens = formatCleanNumber(bnbNum / poolPriceNum, 4)
         setInputValue(tokens)
         onChangeTokens(tokens)
         onChangeBnb(formatCleanNumber(bnbNum, 6))
@@ -113,10 +117,10 @@ export function CreatorBuySection({
       }
       setMode('TOKEN')
     } else {
-      // 切换到 BNB 模式：根据当前输入的代币数换算所需 BNB
+      // 切换到 BNB 模式：有池价时换算预估所需 BNB，无池价则清空待填
       const tokenNum = Number(inputValue) || 0
-      if (tokenNum > 0 && priceNum > 0) {
-        const bnb = formatCleanNumber(tokenNum * priceNum, 6)
+      if (tokenNum > 0 && poolPriceNum > 0) {
+        const bnb = formatCleanNumber(tokenNum * poolPriceNum, 6)
         setInputValue(bnb)
         onChangeBnb(bnb)
         onChangeTokens('0')
@@ -131,7 +135,6 @@ export function CreatorBuySection({
 
   // 输入框变化处理
   const handleInputChange = (val: string) => {
-    if (!isPriceValid) return
     hasSyncedInitialRef.current = true
     // 仅允许合法正浮点数
     if (val !== '' && !/^\d*\.?\d*$/.test(val)) return
@@ -149,64 +152,60 @@ export function CreatorBuySection({
       onChangeTokens('0') // quote 模式
     } else {
       onChangeTokens(val)
-      // 在 token 模式下，同时计算并附带所需的注资 BNB
-      if (priceNum > 0) {
-        const neededBnb = formatCleanNumber(num * priceNum, 6)
-        onChangeBnb(neededBnb)
-      }
+      // token 模式附带预估注资（按开盘池价）；无池价时留 0，提交前按池份额精确计算
+      onChangeBnb(
+        poolPriceNum > 0 ? formatCleanNumber(num * poolPriceNum, 6) : '0',
+      )
     }
   }
 
-  // 快捷百分比（基于钱包 BNB 余额与单钱包限额两者的较小值，扣除 0.005 BNB gas 预留）
+  // 快捷百分比：BNB 模式基于「钱包余额与注资上限的较小值」（扣除 0.005 BNB gas 预留）；
+  // 代币模式基于购买上限（开盘池份额 25%），保证快捷填入不越界
   const handlePercentClick = (percent: number) => {
-    if (!isPriceValid) return
-    const usableBnb = Math.max(0, rawBalanceNum - 0.005)
-    const baseBnb =
-      maxBuyBnb && maxBuyBnb > 0 ? Math.min(usableBnb, maxBuyBnb) : usableBnb
-    const targetBnb = (baseBnb * percent) / 100
-
     if (mode === 'BNB') {
+      const usableBnb = Math.max(0, rawBalanceNum - 0.005)
+      const baseBnb =
+        maxCreatorBuyBnb && maxCreatorBuyBnb > 0
+          ? Math.min(usableBnb, maxCreatorBuyBnb)
+          : usableBnb
+      const targetBnb = (baseBnb * percent) / 100
       const bnbStr = targetBnb > 0 ? formatCleanNumber(targetBnb, 4) : '0'
       setInputValue(bnbStr)
       onChangeBnb(bnbStr)
       onChangeTokens('0')
-    } else {
-      if (priceNum > 0) {
-        const tokens = formatCleanNumber(targetBnb / priceNum, 2)
-        setInputValue(tokens)
-        onChangeTokens(tokens)
-        onChangeBnb(formatCleanNumber(targetBnb, 6))
-      }
+    } else if (maxCreatorBuyTokens && maxCreatorBuyTokens > 0) {
+      const tokens = formatCleanNumber((maxCreatorBuyTokens * percent) / 100, 2)
+      setInputValue(tokens)
+      onChangeTokens(tokens)
+      onChangeBnb(
+        poolPriceNum > 0
+          ? formatCleanNumber(Number(tokens) * poolPriceNum, 6)
+          : '0',
+      )
     }
   }
 
-  // 计算预计收到代币数或预计花费 BNB
-  const inputNum = Number(inputValue) || 0
-  const estimatedTokens =
-    inputNum > 0 && priceNum > 0
-      ? (inputNum / priceNum).toLocaleString(undefined, {
-          maximumFractionDigits: 4,
-        })
-      : inputNum > 0
-        ? '需先输入预售价'
-        : '0'
-
-  const estimatedBnbCost =
-    inputNum > 0 && priceNum > 0
-      ? formatCleanNumber(inputNum * priceNum, 6)
-      : inputNum > 0
-        ? '需先输入预售价'
-        : '0'
-
   // 计算当前注资所需的实际 BNB 数
+  const inputNum = Number(inputValue) || 0
   const currentBnbCost =
-    mode === 'BNB' ? inputNum : priceNum > 0 ? inputNum * priceNum : 0
+    mode === 'BNB' ? inputNum : poolPriceNum > 0 ? inputNum * poolPriceNum : 0
 
-  // 内部校验错误（余额不足或超过单钱包购买上限）
+  // 内部校验错误（代币口径越界 / 注资超上限 / 余额不足）
   let validationError = error
   if (!validationError && currentBnbCost > 0) {
-    if (maxBuyBnb && maxBuyBnb > 0 && currentBnbCost > maxBuyBnb + 0.00001) {
-      validationError = `注资额不能超过购买上限 (${maxBuyBnb} BNB)`
+    if (
+      mode === 'TOKEN' &&
+      maxCreatorBuyTokens &&
+      maxCreatorBuyTokens > 0 &&
+      inputNum > maxCreatorBuyTokens + 0.00001
+    ) {
+      validationError = `购买数量不能超过上限（开盘池代币份额的 25%：${maxCreatorBuyTokens.toLocaleString()} 枚）`
+    } else if (
+      maxCreatorBuyBnb &&
+      maxCreatorBuyBnb > 0 &&
+      currentBnbCost > maxCreatorBuyBnb + 0.00001
+    ) {
+      validationError = `注资额不能超过购买上限（${formatCleanNumber(maxCreatorBuyBnb, 4)} BNB，即开盘池份额的 25%）`
     } else if (rawBalanceNum > 0 && currentBnbCost > rawBalanceNum) {
       validationError = `注资额超出钱包余额 (${formattedBalance} BNB)`
     }
@@ -236,19 +235,23 @@ export function CreatorBuySection({
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-neutral-400">购买上限：</span>
+          <span className="text-neutral-400">购买上限（开盘池份额 25%）：</span>
           <span className="font-mono font-medium text-[#FFA546]">
-            {maxBuyBnb && maxBuyBnb > 0 ? `${maxBuyBnb} BNB` : '--'}
+            {maxCreatorBuyTokens && maxCreatorBuyTokens > 0
+              ? `${maxCreatorBuyTokens.toLocaleString()} 枚`
+              : '--'}
+            {maxCreatorBuyBnb && maxCreatorBuyBnb > 0
+              ? ` ≈ ${formatCleanNumber(maxCreatorBuyBnb, 4)} BNB`
+              : ''}
           </span>
         </div>
       </div>
 
-      {/* 主输入框与右侧切换按钮（Figma 布局，未填预售价时锁定） */}
+      {/* 主输入框与右侧切换按钮 */}
       <div className="flex flex-col gap-1">
         <div
           className={cn(
-            'flex h-11 items-center justify-between border border-[#484b51] bg-[#141517] px-3 transition-colors',
-            isPriceValid ? 'focus-within:border-[#FE810B]' : 'opacity-50 cursor-not-allowed bg-[#181a1d]',
+            'flex h-11 items-center justify-between border border-[#484b51] bg-[#141517] px-3 transition-colors focus-within:border-[#FE810B]',
             validationError && 'border-red-500',
           )}
         >
@@ -256,14 +259,10 @@ export function CreatorBuySection({
           <input
             type="text"
             inputMode="decimal"
-            disabled={!isPriceValid}
-            placeholder={!isPriceValid ? '请先在上方设置预售价' : ''}
+            placeholder=""
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value)}
-            className={cn(
-              'w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-500 focus:outline-none',
-              !isPriceValid && 'cursor-not-allowed text-neutral-500',
-            )}
+            className="w-full bg-transparent font-mono text-sm font-medium text-white placeholder:text-neutral-500 focus:outline-none"
           />
 
           {/* 中间细分割线 */}
@@ -272,15 +271,9 @@ export function CreatorBuySection({
           {/* 右侧模式切换按钮 */}
           <button
             type="button"
-            disabled={!isPriceValid}
             onClick={handleToggleMode}
-            className={cn(
-              'flex shrink-0 items-center gap-1.5 bg-white/5 px-2.5 py-1 text-xs font-semibold text-white transition-all',
-              isPriceValid
-                ? 'cursor-pointer hover:bg-white/10 hover:text-[#FFA546] active:scale-95'
-                : 'cursor-not-allowed opacity-50',
-            )}
-            title={isPriceValid ? '点击切换输入币种 (BNB / 代币)' : '请先设置预售价'}
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 bg-white/5 px-2.5 py-1 text-xs font-semibold text-white transition-all hover:bg-white/10 hover:text-[#FFA546] active:scale-95"
+            title="点击切换输入币种 (BNB / 代币)"
           >
             {mode === 'BNB' ? (
               <>
@@ -307,14 +300,8 @@ export function CreatorBuySection({
           <button
             key={percent}
             type="button"
-            disabled={!isPriceValid}
             onClick={() => handlePercentClick(percent)}
-            className={cn(
-              'flex h-8 items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none',
-              isPriceValid
-                ? 'cursor-pointer hover:border-[#FE810B] hover:text-[#FFA546] active:scale-95'
-                : 'cursor-not-allowed opacity-40',
-            )}
+            className="flex h-8 cursor-pointer items-center justify-center border border-[#2F3737] bg-[#1a1c1e] text-xs font-semibold text-neutral-300 transition-all select-none hover:border-[#FE810B] hover:text-[#FFA546] active:scale-95"
           >
             {percent}%
           </button>
@@ -324,16 +311,15 @@ export function CreatorBuySection({
       {/* 底部换算与模式说明 */}
       <div className="flex items-center justify-between border-t border-white/5 pt-2 text-[11px] text-neutral-400">
         <div>
-          {!isPriceValid ? (
-            <span className="flex items-center gap-1 text-amber-400/90">
-              <Lock className="size-3" />
-              需先在上方设置预售价，方可配置购买金额
-            </span>
-          ) : mode === 'BNB' ? (
+          {mode === 'BNB' ? (
             <span>
               预计获得：
               <strong className="font-mono text-white">
-                {estimatedTokens}
+                {poolPriceNum > 0 && inputNum > 0
+                  ? (inputNum / poolPriceNum).toLocaleString(undefined, {
+                      maximumFractionDigits: 4,
+                    })
+                  : '--'}
               </strong>{' '}
               代币
             </span>
@@ -341,7 +327,9 @@ export function CreatorBuySection({
             <span>
               预计需支付：
               <strong className="font-mono text-white">
-                {estimatedBnbCost}
+                {poolPriceNum > 0 && inputNum > 0
+                  ? formatCleanNumber(inputNum * poolPriceNum, 6)
+                  : '--'}
               </strong>{' '}
               BNB
             </span>
