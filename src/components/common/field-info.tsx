@@ -9,6 +9,6 @@ export function FieldInfo({ field }: { field: AnyFieldApi }) {
     )
     .filter((message): message is string => typeof message === 'string')
 
-  if (errors.length === 0) return null
-  return <p className="mt-1 text-xs text-[#FF4A55]">{errors.join(', ')}</p>
+  if (!field.state.meta.isBlurred || errors.length === 0) return null
+  return <p className="mt-1 text-xs text-[#f7594b]">{errors.join(', ')}</p>
 }

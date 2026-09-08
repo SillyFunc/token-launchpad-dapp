@@ -1,4 +1,4 @@
-import { useEffect, type InputHTMLAttributes, type ReactNode } from 'react'
+import { type InputHTMLAttributes, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from '@tanstack/react-form'
@@ -10,7 +10,7 @@ import { Calculator, Coins } from 'lucide-react'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
-import { TaxSlider } from '@/components/common/tax-slider'
+import { FieldInfo } from '@/components/common/field-info'
 import { toast } from '@/components/ui/toast'
 import { updateTokenInfo, type TokenDetail } from '@/api/token'
 import { requestAuthSignature } from '@/api/auth'
@@ -41,7 +41,7 @@ const sanitizeIntInput = (raw: string) =>
   raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
 
 /** 小数输入清洗：仅保留数字与第一个小数点，最多 4 位小数 */
-const sanitizeDecimalInput = (raw: string) => {
+const sanitizeDecimalInput = (raw: string, maxDecimals = 4) => {
   let next = raw.replace(/[^\d.]/g, '')
   const firstDot = next.indexOf('.')
   if (firstDot !== -1) {
@@ -50,7 +50,7 @@ const sanitizeDecimalInput = (raw: string) => {
       next
         .slice(firstDot + 1)
         .replace(/\./g, '')
-        .slice(0, 4)
+        .slice(0, maxDecimals)
   }
   const dotIndex = next.indexOf('.')
   const intPart = (dotIndex === -1 ? next : next.slice(0, dotIndex)).replace(
@@ -127,36 +127,31 @@ export function PresaleForm({
   const maxCreatorBuyTokensNum =
     poolShare > 0n ? Number(formatEther(poolShare / 4n)) : 0
 
-  // 预售价 = hardcap / presaleShare，按 18 位 wei 精度计算
-  const calculatePriceBnb = (hardcapStr: string): string => {
-    if (!hardcapStr || presaleShare <= 0n) return ''
-    const hardcapWei = parseEther(hardcapStr)
-    const priceWei = (hardcapWei * 10n ** 18n) / presaleShare
-    return priceWei > 0n ? formatEther(priceWei) : ''
-  }
-
   const initialHardcap = token?.hardcap ? String(token.hardcap) : ''
   const initialSoftcap =
     token?.softcap || token?.soft ? String(token.softcap || token.soft) : ''
 
-  const initialMaxBuyPercent = (() => {
-    if (token?.maxBuyPerWallet && presaleShareNum > 0) {
-      const p = Math.round(
-        (Number(token.maxBuyPerWallet) / presaleShareNum) * 100,
-      )
-      if (p >= 2 && p <= 5) return p
+  const initialMaxBuyBnb = (() => {
+    if (token?.maxBuyPerWallet && token?.presaleTokenPrice) {
+      try {
+        const maxBuyTokensWei = parseEther(String(token.maxBuyPerWallet))
+        const priceWei = parseEther(String(token.presaleTokenPrice))
+        if (maxBuyTokensWei > 0n && priceWei > 0n) {
+          return formatEther((maxBuyTokensWei * priceWei) / 10n ** 18n)
+        }
+      } catch {
+        // Ignore malformed persisted values and leave the field empty.
+      }
     }
-    return 2
+    return ''
   })()
 
   const form = useForm({
     defaultValues: {
-      presaleTokenPrice: initialHardcap
-        ? calculatePriceBnb(initialHardcap)
-        : token?.presaleTokenPrice
-          ? String(token.presaleTokenPrice)
-          : '',
-      maxBuyPercent: initialMaxBuyPercent,
+      presaleTokenPrice: token?.presaleTokenPrice
+        ? String(token.presaleTokenPrice)
+        : '',
+      maxBuyBnb: initialMaxBuyBnb,
       hardcap: initialHardcap,
       softcap: initialSoftcap,
       vestingDelay: token?.vestingDelay ? String(token.vestingDelay) : '7',
@@ -165,7 +160,7 @@ export function PresaleForm({
         ? String(token.creatorBuyTokens)
         : '0',
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
-      startTime: '0',
+      startTime: '',
       durationValue: '30',
       durationUnit: '分钟',
     },
@@ -177,21 +172,33 @@ export function PresaleForm({
       const softcapWei = parseEther(softcapStr)
       const minLiquidityWei = softcapWei // 自动对齐软顶
 
-      // 预售价由硬顶与预售份额自动计算
-      const priceWei =
-        presaleShare > 0n && hardcapWei > 0n
-          ? (hardcapWei * 10n ** 18n) / presaleShare
-          : parseEther('0')
-      if (priceWei <= 0n) {
-        toast.error('请先输入有效的硬顶，并等待预售份额读取完成')
+      const priceWei = parseEther(value.presaleTokenPrice || '0')
+      if (priceWei <= 0n || presaleShare <= 0n) {
+        toast.error('请输入有效的预售价格，并等待预售份额读取完成')
         return
       }
       const priceBNB = formatEther(priceWei)
 
-      // 测试阶段临时放宽链上单钱包上限：始终传入完整预售份额（硬顶的 100%）。
-      // UI 仍保留 2%~5% 滑杆与原有展示，后续恢复真实限购时无需改交互。
-      // 预售价 = hardcap / presaleShare，因此完整预售份额对应硬顶 100%。
-      const maxBuyWei = presaleShare
+      const maxBuyBnbWei = parseEther(value.maxBuyBnb || '0')
+      const maxRaiseWei = (priceWei * presaleShare) / 10n ** 18n
+      if (
+        maxBuyBnbWei <= 0n ||
+        maxBuyBnbWei > hardcapWei ||
+        maxBuyBnbWei > maxRaiseWei
+      ) {
+        toast.error('单钱包认购上限须大于 0 且不超过硬顶')
+        return
+      }
+      if (maxRaiseWei < softcapWei) {
+        toast.error('当前预售价下即使售罄也达不到软顶，请提高预售价')
+        return
+      }
+      // 合约字段 maxBuyPerWallet 的单位是代币 wei，按手动预售价换算。
+      const maxBuyWei = (maxBuyBnbWei * 10n ** 18n) / priceWei
+      if (maxBuyWei <= 0n) {
+        toast.error('单钱包认购上限过小，换算后不足 1 个最小代币单位')
+        return
+      }
       const maxBuyTokensStr = formatEther(maxBuyWei)
 
       // 测试网环境：无论 UI 输入多少，接口与合约统一固定传入 5 分钟 (300 秒)
@@ -246,20 +253,17 @@ export function PresaleForm({
         )
         return
       }
+      if (!resolvedTokenAddress || !isAddress(resolvedTokenAddress)) {
+        toast.error('未找到有效的代币合约地址，请先在控制台完成代币发行')
+        return
+      }
 
       try {
-        if (!resolvedTokenAddress || !isAddress(resolvedTokenAddress)) {
-          toast.error('未找到有效的代币合约地址，请先在控制台完成代币发行')
-          return
-        }
-
         const coordinator =
           getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
-        // ① 先获取钱包签名鉴权
         const auth = await requestAuthSignature(config, address)
 
-        // ② 链上调用 coordinator.setupPresale（一次性配置 + 购买注资）
         const setupHash = await writeContract(config, {
           address: coordinator,
           abi: CoordinatorFactoryAbi,
@@ -289,7 +293,6 @@ export function PresaleForm({
           chainId: DEFAULT_CHAIN_ID,
         })
 
-        // ③ 同步预售信息到后端数据库
         await updateTokenInfo({
           id: token?.id ?? '',
           name: token?.name ?? '',
@@ -331,21 +334,6 @@ export function PresaleForm({
     },
   })
 
-  // 总量/分配比例异步读取完成后，为新建表单补上自动预售价；已有价格不覆盖
-  useEffect(() => {
-    if (
-      !token?.presaleTokenPrice &&
-      form.getFieldValue('hardcap') &&
-      presaleShare > 0n &&
-      !form.getFieldValue('presaleTokenPrice')
-    ) {
-      form.setFieldValue(
-        'presaleTokenPrice',
-        calculatePriceBnb(form.getFieldValue('hardcap')),
-      )
-    }
-  }, [presaleShare, token?.presaleTokenPrice])
-
   return (
     <form
       className="flex flex-col gap-8"
@@ -370,7 +358,8 @@ export function PresaleForm({
           }}
         >
           {(field) => (
-            <FieldWrap label="硬顶" required error={field.state.meta.errors[0]}>
+              <FieldWrap label="硬顶" required>
+
               <UnitInput
                 id={field.name}
                 name={field.name}
@@ -378,14 +367,13 @@ export function PresaleForm({
                 autoComplete="off"
                 placeholder=""
                 value={field.state.value}
-                onChange={(e) => {
-                  const val = sanitizeDecimalInput(e.target.value)
-                  field.handleChange(val)
-                  form.setFieldValue('presaleTokenPrice', calculatePriceBnb(val))
-                }}
+                onChange={(e) =>
+                  field.handleChange(sanitizeDecimalInput(e.target.value))
+                }
                 onBlur={field.handleBlur}
                 unit="BNB"
               />
+              <FieldInfo field={field} />
             </FieldWrap>
           )}
         </form.Field>
@@ -412,7 +400,8 @@ export function PresaleForm({
           }}
         >
           {(field) => (
-            <FieldWrap label="软顶" required error={field.state.meta.errors[0]}>
+              <FieldWrap label="软顶" required>
+
               <UnitInput
                 id={field.name}
                 name={field.name}
@@ -426,86 +415,109 @@ export function PresaleForm({
                 onBlur={field.handleBlur}
                 unit="BNB"
               />
+              <FieldInfo field={field} />
             </FieldWrap>
           )}
         </form.Field>
-{/* 
-        <form.Subscribe selector={(state) => state.values.presaleTokenPrice}>
-          {(presaleTokenPrice) => (
-            <FieldWrap label="预售价格" required>
-              <div className="flex h-10.5 items-center justify-between rounded-xs border border-[#484b51] bg-[#181a1d] px-3 text-sm text-white">
-                <span className="font-mono font-medium">
-                  {presaleTokenPrice || '--'}
-                </span>
-                <span className="text-xs font-semibold text-[#FE810B]">
-                  BNB/枚
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-neutral-500">
-                预售价 = 硬顶 ÷ 预售份额，随硬顶自动更新
-              </p>
-            </FieldWrap>
-          )}
-        </form.Subscribe> */}
-
-
         <form.Field
-          name="maxBuyPercent"
+          name="presaleTokenPrice"
           validators={{
             onChange: ({ value }) => {
-              const n = Number(value)
-              if (!Number.isInteger(n) || n < 2 || n > 5)
-                return '单钱包限额比例须为 2% 至 5% 之间的整数'
+              if (!value) return '请输入预售价格'
+              try {
+                if (parseEther(value) <= 0n) return '预售价格必须大于 0'
+              } catch {
+                return '请输入有效的 BNB 价格'
+              }
               return undefined
             },
           }}
         >
           {(field) => (
-            <div className="flex flex-col">
-              <TaxSlider
+            <FieldWrap label="预售价格" required>
+              <UnitInput
                 id={field.name}
-                label="单钱包认购上限"
-                required
-                min={2}
-                max={5}
-                step={1}
-                value={Number(field.state.value) || 2}
-                onChange={field.handleChange}
+                name={field.name}
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder=""
+                value={field.state.value}
+                onChange={(e) =>
+                  field.handleChange(sanitizeDecimalInput(e.target.value, 18))
+                }
+                onBlur={field.handleBlur}
+                unit="BNB"
               />
-              <form.Subscribe
-                selector={(state) => ({
-                  hardcap: state.values.hardcap,
-                  percent: state.values.maxBuyPercent,
-                })}
-              >
-                {({ hardcap, percent }) => {
-                  const hardcapNum = Number(hardcap)
-                  const hasValidHardcap =
-                    Boolean(hardcap) &&
-                    !Number.isNaN(hardcapNum) &&
-                    hardcapNum > 0
+              <FieldInfo field={field} />
+              <p className="mt-1 text-xs text-neutral-500">
+                请输入项目方设定的每枚代币 BNB 价格
+              </p>
+            </FieldWrap>
+          )}
+        </form.Field>
 
-                  const p = hasValidHardcap ? Number(percent || 2) : 0
-                  const maxBnb = hasValidHardcap
-                    ? Number((hardcapNum * (p / 100)).toFixed(4))
-                    : 0
+        <form.Field
+          name="maxBuyBnb"
+          validators={{
+            onChangeListenTo: [
+              'hardcap',
+              'softcap',
+              'presaleTokenPrice',
+            ],
+            onChange: ({ value, fieldApi }) => {
+              if (!value) return '请输入单钱包认购上限'
+              let maxBuyBnbWei: bigint
+              try {
+                maxBuyBnbWei = parseEther(value)
+              } catch {
+                return '请输入有效的 BNB 金额'
+              }
+              if (maxBuyBnbWei <= 0n) return '单钱包认购上限必须大于 0'
 
-                  return (
-                    <span className="mt-2.5 text-xs text-neutral-400">
-                      每个钱包最多出资 {maxBnb} BNB（占硬顶 {p}%）
-                    </span>
-                  )
-                }}
-              </form.Subscribe>
-              {field.state.meta.errors[0] && (
-                <p className="mt-1 text-xs text-red-500">
-                  {typeof field.state.meta.errors[0] === 'string'
-                    ? field.state.meta.errors[0]
-                    : (field.state.meta.errors[0] as { message?: string })
-                        ?.message}
-                </p>
-              )}
-            </div>
+              const hardcap = fieldApi.form.getFieldValue('hardcap')
+              const softcap = fieldApi.form.getFieldValue('softcap')
+              const price = fieldApi.form.getFieldValue('presaleTokenPrice')
+              let hardcapWei: bigint
+              let softcapWei: bigint
+              let priceWei: bigint
+              try {
+                hardcapWei = parseEther(hardcap || '0')
+                softcapWei = parseEther(softcap || '0')
+                priceWei = parseEther(price || '0')
+              } catch {
+                return '请先输入有效的硬顶、软顶和预售价格'
+              }
+              if (hardcapWei <= 0n) return '请先输入有效的硬顶金额'
+              if (priceWei <= 0n) return '请先输入有效的预售价格'
+              if (maxBuyBnbWei > hardcapWei)
+                return '单钱包认购上限不能超过硬顶'
+
+              const maxRaiseWei = (priceWei * presaleShare) / 10n ** 18n
+              if (maxRaiseWei < softcapWei)
+                return '当前预售价下售罄也达不到软顶，请提高预售价'
+              if (maxBuyBnbWei > maxRaiseWei)
+                return '单钱包认购上限不能超过预售可募集总额'
+              return undefined
+            },
+          }}
+        >
+          {(field) => (
+            <FieldWrap label="单钱包认购上限" required>
+              <UnitInput
+                id={field.name}
+                name={field.name}
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder=""
+                value={field.state.value}
+                onChange={(e) =>
+                  field.handleChange(sanitizeDecimalInput(e.target.value))
+                }
+                onBlur={field.handleBlur}
+                unit="BNB"
+              />
+              <FieldInfo field={field} />
+            </FieldWrap>
           )}
         </form.Field>
 
@@ -587,18 +599,21 @@ export function PresaleForm({
       <div className="flex flex-col gap-4">
         <FormSectionTitle title="认购时间" required />
 
-        <form.Field name="startTime">
+        <form.Field
+          name="startTime"
+          validators={{
+            onChange: ({ value }) =>
+              value && Number(value) > 0 ? undefined : '请选择开始时间',
+          }}
+        >
           {(field) => (
-            <FieldWrap
-              label="开始时间"
-              required
-              error={field.state.meta.errors[0]}
-            >
+            <FieldWrap label="开始时间" required>
               <StartTimePicker
                 value={field.state.value}
                 onChange={field.handleChange}
                 onBlur={field.handleBlur}
               />
+              <FieldInfo field={field} />
             </FieldWrap>
           )}
         </form.Field>
@@ -623,7 +638,6 @@ export function PresaleForm({
             <FieldWrap
               label="认购时长"
               required
-              error={field.state.meta.errors[0]}
             >
               <form.Subscribe
                 selector={(state) =>
@@ -642,13 +656,10 @@ export function PresaleForm({
                       onChange={(e) =>
                         field.handleChange(sanitizeIntInput(e.target.value))
                       }
-                      onBlur={() => {
-                        field.handleBlur()
-                        // 输入 0 自动回填最小值 1（超上限的情况由 validator 提示）
-                        if (field.state.value === '0') field.handleChange('1')
-                      }}
+                      onBlur={field.handleBlur}
                       unit={unit}
                     />
+                    <FieldInfo field={field} />
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       {(Object.keys(DURATION_UNITS) as DurationUnit[]).map(
                         (u) => (
@@ -696,7 +707,6 @@ export function PresaleForm({
             <FieldWrap
               label="释放周期"
               required
-              error={field.state.meta.errors[0]}
             >
               <UnitInput
                 id={field.name}
@@ -708,16 +718,11 @@ export function PresaleForm({
                 onChange={(e) =>
                   field.handleChange(sanitizeIntInput(e.target.value))
                 }
-                onBlur={() => {
-                  field.handleBlur()
-                  // 超出 7-90 天限制范围 → 自动回填最小值 7 天
-                  const n = Number(field.state.value)
-                  if (field.state.value && (n < 7 || n > 90)) {
-                    field.handleChange('7')
-                  }
-                }}
+                      onBlur={field.handleBlur}
+
                 unit="天"
               />
+              <FieldInfo field={field} />
             </FieldWrap>
           )}
         </form.Field>
@@ -738,8 +743,7 @@ export function PresaleForm({
               <FieldWrap
                 label="释放比例"
                 required
-                error={field.state.meta.errors[0]}
-              >
+                >
                 <div className="grid grid-cols-4 gap-2">
                   {[5, 10, 15, 20].map((rate) => {
                     const isSelected = currentVal === rate
@@ -760,6 +764,7 @@ export function PresaleForm({
                     )
                   })}
                 </div>
+                <FieldInfo field={field} />
               </FieldWrap>
             )
           }}
@@ -799,10 +804,11 @@ export function PresaleForm({
           selector={(state) => ({
             creatorBuyBnb: state.values.creatorBuyBnb,
             creatorBuyTokens: state.values.creatorBuyTokens,
+            presaleTokenPrice: state.values.presaleTokenPrice,
             hardcap: state.values.hardcap,
           })}
         >
-          {({ creatorBuyBnb, creatorBuyTokens, hardcap }) => {
+          {({ creatorBuyBnb, creatorBuyTokens, presaleTokenPrice, hardcap }) => {
             const hardcapNum = Number(hardcap || 0)
             // BNB 注资口径上限 = 开盘池 BNB（≈硬顶）的 1/3，恒定乘积下恰为买走 25% 池代币
             const maxCreatorBuyBnb =
@@ -819,6 +825,7 @@ export function PresaleForm({
                 creatorBuyTokens={creatorBuyTokens}
                 maxCreatorBuyBnb={maxCreatorBuyBnb}
                 maxCreatorBuyTokens={maxCreatorBuyTokensNum}
+                presaleTokenPrice={presaleTokenPrice}
                 onChangeBnb={(val) => form.setFieldValue('creatorBuyBnb', val)}
                 onChangeTokens={(val) =>
                   form.setFieldValue('creatorBuyTokens', val)
@@ -832,7 +839,15 @@ export function PresaleForm({
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-t-white/10 bg-[#131516] p-4">
         <form.Subscribe
           selector={(state) => ({
-            canSubmit: state.isValid && !state.isSubmitting,
+            canSubmit:
+              state.canSubmit &&
+              Boolean(
+                state.values.hardcap &&
+                  state.values.softcap &&
+                  state.values.presaleTokenPrice &&
+                  state.values.maxBuyBnb &&
+                  state.values.startTime,
+              ),
             isSubmitting: state.isSubmitting,
           })}
         >
@@ -876,7 +891,6 @@ function UnitInput({
 interface FieldWrapProps {
   label: string
   required?: boolean
-  error?: unknown
   labelClassName?: string
   children: ReactNode
 }
@@ -884,14 +898,9 @@ interface FieldWrapProps {
 function FieldWrap({
   label,
   required = false,
-  error,
   labelClassName = 'text-sm text-white',
   children,
 }: FieldWrapProps) {
-  const errorText =
-    typeof error === 'string'
-      ? error
-      : (error as { message?: string } | undefined)?.message
   return (
     <div className="flex flex-col">
       <div className="mb-1.5 flex items-center gap-0.5">
@@ -899,7 +908,6 @@ function FieldWrap({
         {required && <span className="text-xs text-[#f7594b]">*</span>}
       </div>
       {children}
-      {errorText && <p className="mt-1 text-xs text-[#f7594b]">{errorText}</p>}
     </div>
   )
 }

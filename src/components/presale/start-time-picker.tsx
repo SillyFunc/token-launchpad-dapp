@@ -4,8 +4,6 @@ import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  Zap,
-  Timer,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -61,9 +59,6 @@ export function StartTimePicker({
   const numericTimestamp = Number(value) || 0
 
   // 视觉模式与表单值解耦：进入「定时」选定具体时刻前不落值
-  const [mode, setMode] = useState<'immediate' | 'timed'>(
-    numericTimestamp > 0 ? 'timed' : 'immediate',
-  )
   const [datePicked, setDatePicked] = useState(numericTimestamp > 0)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(() =>
     numericTimestamp > 0 ? new Date(numericTimestamp * 1000) : defaultTarget(),
@@ -86,12 +81,10 @@ export function StartTimePicker({
   useEffect(() => {
     if (numericTimestamp > 0) {
       const d = new Date(numericTimestamp * 1000)
-      setMode('timed')
       setDatePicked(true)
       setSelectedDate(d)
       setTimeStr(formatTimeStr(d))
     } else {
-      setMode('immediate')
       setDatePicked(false)
     }
   }, [numericTimestamp])
@@ -130,27 +123,14 @@ export function StartTimePicker({
   }
 
   const openPanel = () => {
-    const base = selectedDate ?? now
+    const base = selectedDate ?? defaultTarget()
+    if (!datePicked) {
+      setSelectedDate(base)
+      setTimeStr(formatTimeStr(base))
+      setDatePicked(true)
+    }
     setView({ year: base.getFullYear(), month: base.getMonth() })
     setOpen(true)
-  }
-
-  const handleImmediate = () => {
-    setMode('immediate')
-    setDatePicked(false)
-    setOpen(false)
-    onChange('0')
-    onBlur?.()
-  }
-
-  const handleTimed = () => {
-    if (mode !== 'timed') {
-      setMode('timed')
-      setDatePicked(false)
-      setSelectedDate(defaultTarget())
-      setTimeStr(formatTimeStr(defaultTarget()))
-    }
-    onBlur?.()
   }
 
   // 日历网格：周一为首列，前置空位补位
@@ -187,48 +167,13 @@ export function StartTimePicker({
   }
 
   const displayDateTime =
-    mode === 'timed' && datePicked && numericTimestamp > 0
+    datePicked && numericTimestamp > 0
       ? format(new Date(numericTimestamp * 1000), 'yyyy年MM月dd日 HH:mm:ss')
       : null
 
   return (
     <div className="relative flex flex-col gap-3">
-      {/* 顶部模式切换按钮 */}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={handleImmediate}
-          className={cn(
-            'flex h-10 cursor-pointer items-center justify-center gap-2 border text-xs font-semibold transition-all select-none',
-            mode === 'immediate'
-              ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
-              : 'border-[#484b51] bg-[#1a1c1e] text-neutral-400 hover:border-neutral-500 hover:text-white',
-          )}
-        >
-          <Zap className="size-3.5" />
-          <span>立即开始</span>
-        </button>
-
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={handleTimed}
-          className={cn(
-            'flex h-10 cursor-pointer items-center justify-center gap-2 border text-xs font-semibold transition-all select-none',
-            mode === 'timed'
-              ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
-              : 'border-[#484b51] bg-[#1a1c1e] text-neutral-400 hover:border-neutral-500 hover:text-white',
-          )}
-        >
-          <Timer className="size-3.5" />
-          <span>定时开始</span>
-        </button>
-      </div>
-
-      {/* 定时模式：一体化触发框 + 自绘日历/时间面板 */}
-      {mode === 'timed' && (
-        <>
+      {/* 日期时间选择器 */}
           <button
             ref={triggerRef}
             type="button"
@@ -412,8 +357,6 @@ export function StartTimePicker({
               </button>
             </div>
           )}
-        </>
-      )}
     </div>
   )
 }
