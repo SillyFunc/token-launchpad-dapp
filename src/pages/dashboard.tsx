@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection, useWatchContractEvent } from 'wagmi'
@@ -7,8 +6,6 @@ import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
 import { getTokensByCreator, type TokenDetail } from '@/api/token'
 import { Button } from '@/components/ui/button'
-import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
-import { OpenPresaleModal } from '@/components/dashboard/open-presale-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import { CoordinatorFactoryAbi } from '@/contracts/abi'
@@ -18,8 +15,6 @@ export const Dashboard = () => {
   const { address } = useConnection()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [issuingToken, setIssuingToken] = useState<TokenDetail | null>(null)
-  const [openingPresaleToken, setOpeningPresaleToken] = useState<TokenDetail | null>(null)
 
   const {
     data: tokens,
@@ -44,20 +39,19 @@ export const Dashboard = () => {
     eventName: 'TokenPresalePairCreated',
     chainId: DEFAULT_CHAIN_ID,
     enabled: Boolean(address),
+    // transport 的 HTTP 优先用于普通读链；此处显式走 fallback 中的 WebSocket，
+    // 避免 BSC 750ms blockTime 导致 HTTP 每 500ms 轮询事件过滤器。
+    poll: false,
     onLogs: () => {
       void queryClient.invalidateQueries()
       void refetch()
     },
   })
 
-  const handlePresale = (token: TokenDetail) => {
-    if (token.id) {
-      navigate(
-        `/presale?id=${token.id}${token.coinContractAddress ? `&address=${token.coinContractAddress}` : ''}`,
-      )
-    } else if (token.coinContractAddress) {
-      navigate(`/presale?address=${token.coinContractAddress}`)
-    }
+  const handlePresale = (token: TokenDetail, tokenAddress: string) => {
+    navigate(
+      `/presale?address=${tokenAddress}${token.id ? `&id=${token.id}` : ''}`,
+    )
   }
 
   const handleEdit = (token: TokenDetail) => {
@@ -66,8 +60,10 @@ export const Dashboard = () => {
     }
   }
 
-  const handleLaunch = (token: TokenDetail) => {
-    setIssuingToken(token)
+  // 发行地址由卡片直接保留交易回执结果；这里只触发后台数据同步，不把它伪装成接口字段
+  const handleIssued = () => {
+    void queryClient.invalidateQueries()
+    void refetch()
   }
 
   const handleClaim = () => {
@@ -207,46 +203,15 @@ export const Dashboard = () => {
               token={token}
               onEdit={handleEdit}
               onPresale={handlePresale}
-              onOpenPresale={(t) => setOpeningPresaleToken(t)}
-              onLaunch={handleLaunch}
+              onPresaleOpened={() => {
+                void refetch()
+                void queryClient.invalidateQueries()
+              }}
+              onIssued={handleIssued}
               onClaim={handleClaim}
             />
           ))}
         </div>
-      )}
-
-      {issuingToken && (
-        <IssueTokenModal
-          token={issuingToken}
-          onClose={() => setIssuingToken(null)}
-          onSuccess={(tokenAddress) => {
-            queryClient.setQueryData(
-              ['creatorTokens', address],
-              (old: unknown) => {
-                if (!Array.isArray(old)) return old
-                return old.map((t: TokenDetail) =>
-                  t.id === issuingToken.id
-                    ? { ...t, coinContractAddress: tokenAddress as string }
-                    : t,
-                )
-              },
-            )
-            // 立即让链上与后端查询失效并全量重拉，确保状态即时切换
-            void queryClient.invalidateQueries()
-            void refetch()
-          }}
-        />
-      )}
-
-      {openingPresaleToken && (
-        <OpenPresaleModal
-          token={openingPresaleToken}
-          onClose={() => setOpeningPresaleToken(null)}
-          onSuccess={() => {
-            void refetch()
-            void queryClient.invalidateQueries()
-          }}
-        />
       )}
     </div>
   )

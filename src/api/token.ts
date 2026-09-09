@@ -1,4 +1,4 @@
-import { post } from '@/lib/request'
+import { get, post } from '@/lib/request'
 import type { AxiosRequestConfig } from 'axios'
 
 export interface SaveTokenData {
@@ -247,9 +247,58 @@ export interface SaveTokenSaltPayload {
   txHash: string
 }
 
+export type ReservedAddressStatus = 0 | 1 | 2
+
+export interface ReservedAddressListItem {
+  id: number
+  contractAddress: string
+  salt: string
+  /** 0: 未使用；1: 已占用；2: 已使用 */
+  status: ReservedAddressStatus
+}
+
 export function saveTokenSalt(
   payload: SaveTokenSaltPayload,
   config?: AxiosRequestConfig,
 ) {
-  return post('deposit/exSwap/coinIssueSetting/insertSalt', payload, config)
+  return post('deposit/coinIssueSetting/insertSalt', payload, config)
+}
+
+export function getReservedAddressByUser(
+  {
+    contractAddress,
+    userAddress,
+  }: {
+    contractAddress: string
+    userAddress: string
+  },
+  config?: AxiosRequestConfig,
+) {
+  return get<{
+    id: number
+    contractAddress: string
+    address: string
+    memberId: number
+    salt: string
+    txHash: string
+    status: ReservedAddressStatus
+  }>(
+    'deposit/coinIssueSetting/getSalt',
+    {
+      contractAddress,
+      address: userAddress,
+    },
+    config,
+  )
+}
+
+export function getReservedAddressListByUser(
+  address: string,
+  config?: AxiosRequestConfig,
+) {
+  return get<ReservedAddressListItem[]>(
+    'deposit/coinIssueSetting/getSaltList',
+    { address },
+    config,
+  )
 }

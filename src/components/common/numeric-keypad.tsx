@@ -50,7 +50,7 @@ export function NumericKeypad(props: NumericKeypadProps) {
     allowDecimal = false,
     min,
     max,
-    maxDecimals = 4,
+    maxDecimals = 18,
   } = props
 
   const sheetRef = useRef<HTMLDivElement>(null)

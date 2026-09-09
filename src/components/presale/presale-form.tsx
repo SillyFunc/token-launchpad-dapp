@@ -21,27 +21,23 @@ import { CoordinatorFactoryAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
 import { useLocale } from '@/lib/i18n'
 import { formatTokenSupply } from '@/lib/format'
+import { calculatePresaleTokenPrice } from '@/lib/presale-price'
 import { cn } from '@/lib/utils'
 
-/** 天 → 秒（date-fns v4 无 daysToSeconds，经小时换算） */
-const daysToSeconds = (days: number) => hoursToSeconds(days * 24)
+/** 认购时长约束（主网文档 §2）：1 ~ 90 小时，边界允许，违规 revert InvalidDuration */
+const DURATION_MIN_SEC = hoursToSeconds(1)
+const DURATION_MAX_SEC = hoursToSeconds(90)
 
-/** 认购时长单位 → 秒（date-fns 换算；合约约束：1 分钟 ~ 30 天，违规 revert InvalidDuration） */
-const DURATION_UNITS = {
-  分钟: minutesToSeconds,
-  小时: hoursToSeconds,
-  天: daysToSeconds,
-} as const
-type DurationUnit = keyof typeof DURATION_UNITS
-const DURATION_MIN_SEC = minutesToSeconds(1)
-const DURATION_MAX_SEC = daysToSeconds(30)
+/** 释放周期约束（主网文档 §2）：5 ~ 30 分钟，边界允许，违规 revert InvalidVestingDelay */
+const VESTING_DELAY_MIN_SEC = minutesToSeconds(5)
+const VESTING_DELAY_MAX_SEC = minutesToSeconds(30)
 
 /** 整数输入清洗：仅保留数字、去前导零（范围回填在 blur 时进行，避免打断输入） */
 const sanitizeIntInput = (raw: string) =>
   raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
 
 /** 小数输入清洗：仅保留数字与第一个小数点，最多 4 位小数 */
-const sanitizeDecimalInput = (raw: string, maxDecimals = 4) => {
+const sanitizeDecimalInput = (raw: string, maxDecimals = 18) => {
   let next = raw.replace(/[^\d.]/g, '')
   const firstDot = next.indexOf('.')
   if (firstDot !== -1) {
@@ -120,12 +116,13 @@ export function PresaleForm({
   const presaleShareText =
     presaleShare > 0n ? formatTokenSupply(presaleShare, locale) : '--'
 
-  // 开盘池代币份额 = 发行总量 × poolBps；创建者购买上限 = 份额的 25%
-  // （合约常量 MAX_CREATOR_BUY_POOL_BPS = 2500，BNB 口径 ≈ 开盘池 BNB（硬顶）的 1/3）
+  // 开盘池代币份额 = 发行总量 × poolBps；创建者购买上限 = 份额的 5%
+  // （合约常量 MAX_CREATOR_BUY_POOL_BPS = 500；quote 模式花费上限 = 池 BNB × 500/9500 ≈ 1/19，
+  // 恒定乘积下与 token 模式 5% 共用同一物理上界）
   const poolShare = (totalSupply * BigInt(poolBps)) / 10000n
   const poolShareNum = Number(formatEther(poolShare))
   const maxCreatorBuyTokensNum =
-    poolShare > 0n ? Number(formatEther(poolShare / 4n)) : 0
+    poolShare > 0n ? Number(formatEther(poolShare / 20n)) : 0
 
   const initialHardcap = token?.hardcap ? String(token.hardcap) : ''
   const initialSoftcap =
@@ -146,23 +143,27 @@ export function PresaleForm({
     return ''
   })()
 
+  // 后端 vestingDelay 以秒存储，表单展示口径为分钟；历史脏值夹紧到主网合法区间
+  const initialVestingDelayMinutes = (() => {
+    const sec = Number(token?.vestingDelay) || 0
+    if (sec <= 0) return '5'
+    const minutes = Math.round(sec / 60)
+    return String(Math.min(30, Math.max(5, minutes)))
+  })()
+
   const form = useForm({
     defaultValues: {
-      presaleTokenPrice: token?.presaleTokenPrice
-        ? String(token.presaleTokenPrice)
-        : '',
       maxBuyBnb: initialMaxBuyBnb,
       hardcap: initialHardcap,
       softcap: initialSoftcap,
-      vestingDelay: token?.vestingDelay ? String(token.vestingDelay) : '7',
+      vestingDelayMinutes: initialVestingDelayMinutes,
       vestingRate: token?.vestingRate ? Number(token.vestingRate) : 5,
       creatorBuyTokens: token?.creatorBuyTokens
         ? String(token.creatorBuyTokens)
         : '0',
       creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
       startTime: '',
-      durationValue: '30',
-      durationUnit: '分钟',
+      durationHours: '1',
     },
     onSubmit: async ({ value }) => {
       const hardcapNum = Number(value.hardcap || '0')
@@ -172,9 +173,9 @@ export function PresaleForm({
       const softcapWei = parseEther(softcapStr)
       const minLiquidityWei = softcapWei // 自动对齐软顶
 
-      const priceWei = parseEther(value.presaleTokenPrice || '0')
-      if (priceWei <= 0n || presaleShare <= 0n) {
-        toast.error('请输入有效的预售价格，并等待预售份额读取完成')
+      const priceWei = calculatePresaleTokenPrice(hardcapWei, presaleShare)
+      if (!priceWei) {
+        toast.error('请输入有效的硬顶，并等待预售份额读取完成')
         return
       }
       const priceBNB = formatEther(priceWei)
@@ -193,7 +194,7 @@ export function PresaleForm({
         toast.error('当前预售价下即使售罄也达不到软顶，请提高预售价')
         return
       }
-      // 合约字段 maxBuyPerWallet 的单位是代币 wei，按手动预售价换算。
+      // 合约字段 maxBuyPerWallet 的单位是代币 wei，按自动计算的预售价换算。
       const maxBuyWei = (maxBuyBnbWei * 10n ** 18n) / priceWei
       if (maxBuyWei <= 0n) {
         toast.error('单钱包认购上限过小，换算后不足 1 个最小代币单位')
@@ -201,19 +202,24 @@ export function PresaleForm({
       }
       const maxBuyTokensStr = formatEther(maxBuyWei)
 
-      // 测试网环境：无论 UI 输入多少，接口与合约统一固定传入 5 分钟 (300 秒)
-      const FIXED_VESTING_DELAY_SEC = 300
-      const vestingDelaySec = BigInt(FIXED_VESTING_DELAY_SEC)
+      // 释放周期（秒）：5 ~ 30 分钟
+      const vestingDelaySec = BigInt(
+        Math.round(minutesToSeconds(Number(value.vestingDelayMinutes || 0))),
+      )
+      if (
+        vestingDelaySec < VESTING_DELAY_MIN_SEC ||
+        vestingDelaySec > VESTING_DELAY_MAX_SEC
+      ) {
+        toast.error('释放周期须在 5 至 30 分钟之间')
+        return
+      }
 
-      // 认购时长（秒）：1 分钟 ~ 30 天，默认 30 分钟
+      // 认购时长（秒）：1 ~ 90 小时
       const durationSec = Math.round(
-        (
-          DURATION_UNITS[(value.durationUnit || '分钟') as DurationUnit] ??
-          minutesToSeconds
-        )(Number(value.durationValue || '0')),
+        hoursToSeconds(Number(value.durationHours || '0')),
       )
       if (durationSec < DURATION_MIN_SEC || durationSec > DURATION_MAX_SEC) {
-        toast.error('认购时长须在 1 分钟至 30 天之间')
+        toast.error('认购时长须在 1 至 90 小时之间')
         return
       }
 
@@ -224,8 +230,8 @@ export function PresaleForm({
       const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
       let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
 
-      // 代币模式注资：按恒定乘积精确覆盖价格影响 B·t/(T−t)（t ≤ T/4 时恰为池 BNB 的 1/3，
-      // 与创建者购买上限同口径）；合约对超额部分同交易自动退回
+      // 代币模式注资：按恒定乘积精确覆盖价格影响 B·t/(T−t)（t = T/20 时恰为池 BNB 的 1/19，
+      // 与合约 quote 模式花费上限同口径）；合约对超额部分同交易自动退回
       if (creatorBuyTokensWei > 0n) {
         if (poolShare <= creatorBuyTokensWei) {
           toast.error('发行总量未就绪，无法计算创建者购买注资')
@@ -235,21 +241,21 @@ export function PresaleForm({
           (hardcapWei * creatorBuyTokensWei) / (poolShare - creatorBuyTokensWei)
       }
 
-      // 校验创建者购买上限：开盘池代币份额的 25%（BNB 注资口径 = 池 BNB 的 1/3）
+      // 校验创建者购买上限：开盘池代币份额的 5%（quote 模式 BNB 花费口径 ≈ 池 BNB 的 1/19）
       const creatorBuyBnbNum = Number(formatEther(creatorBuyBnbWei))
-      const maxCreatorBuyBnbAllowed = hardcapNum / 3
+      const maxCreatorBuyBnbAllowed = hardcapNum / 19
       if (
         maxCreatorBuyBnbAllowed > 0 &&
         creatorBuyBnbNum > maxCreatorBuyBnbAllowed + 0.0001
       ) {
         toast.error(
-          `创建者注资不能超过购买上限（开盘池份额 25% ≈ ${maxCreatorBuyBnbAllowed.toFixed(4)} BNB）`,
+          `创建者注资不能超过购买上限（开盘池份额 5% ≈ ${maxCreatorBuyBnbAllowed.toFixed(4)} BNB）`,
         )
         return
       }
-      if (poolShare > 0n && creatorBuyTokensWei > poolShare / 4n) {
+      if (poolShare > 0n && creatorBuyTokensWei > poolShare / 20n) {
         toast.error(
-          `创建者购买数量不能超过开盘池份额的 25%（${formatTokenSupply(poolShare / 4n, locale)} 枚）`,
+          `创建者购买数量不能超过开盘池份额的 5%（${formatTokenSupply(poolShare / 20n, locale)} 枚）`,
         )
         return
       }
@@ -317,7 +323,7 @@ export function PresaleForm({
           minLiquidityAmount: softcapStr,
           startTime: pickedStartSec,
           endTime: pickedStartSec > 0 ? pickedStartSec + durationSec : 0,
-          vestingDelay: FIXED_VESTING_DELAY_SEC,
+          vestingDelay: Number(vestingDelaySec),
           vestingRate: Number(value.vestingRate) || 5,
           slippage: 0,
           creatorBuyTokens: value.creatorBuyTokens || '0',
@@ -419,42 +425,34 @@ export function PresaleForm({
             </FieldWrap>
           )}
         </form.Field>
-        <form.Field
-          name="presaleTokenPrice"
-          validators={{
-            onChange: ({ value }) => {
-              if (!value) return '请输入预售价格'
-              try {
-                if (parseEther(value) <= 0n) return '预售价格必须大于 0'
-              } catch {
-                return '请输入有效的 BNB 价格'
-              }
-              return undefined
-            },
+        <form.Subscribe selector={(state) => state.values.hardcap}>
+          {(hardcap) => {
+            let priceText = ''
+            try {
+              const priceWei = calculatePresaleTokenPrice(
+                parseEther(hardcap || '0'),
+                presaleShare,
+              )
+              priceText = priceWei ? formatEther(priceWei) : ''
+            } catch {
+              priceText = ''
+            }
+
+            return (
+              <FieldWrap label="预售价格（自动计算）" required>
+                <UnitInput
+                  readOnly
+                  value={priceText}
+                  placeholder="填写硬顶后自动计算"
+                  unit="BNB/枚"
+                />
+                <p className="mt-1 text-xs text-neutral-500">
+                  单价 = 向上取整（硬顶 ÷ 预售总量），售罄募集金额不低于硬顶
+                </p>
+              </FieldWrap>
+            )
           }}
-        >
-          {(field) => (
-            <FieldWrap label="预售价格" required>
-              <UnitInput
-                id={field.name}
-                name={field.name}
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder=""
-                value={field.state.value}
-                onChange={(e) =>
-                  field.handleChange(sanitizeDecimalInput(e.target.value, 18))
-                }
-                onBlur={field.handleBlur}
-                unit="BNB"
-              />
-              <FieldInfo field={field} />
-              <p className="mt-1 text-xs text-neutral-500">
-                请输入项目方设定的每枚代币 BNB 价格
-              </p>
-            </FieldWrap>
-          )}
-        </form.Field>
+        </form.Subscribe>
 
         <form.Field
           name="maxBuyBnb"
@@ -462,7 +460,6 @@ export function PresaleForm({
             onChangeListenTo: [
               'hardcap',
               'softcap',
-              'presaleTokenPrice',
             ],
             onChange: ({ value, fieldApi }) => {
               if (!value) return '请输入单钱包认购上限'
@@ -476,19 +473,20 @@ export function PresaleForm({
 
               const hardcap = fieldApi.form.getFieldValue('hardcap')
               const softcap = fieldApi.form.getFieldValue('softcap')
-              const price = fieldApi.form.getFieldValue('presaleTokenPrice')
               let hardcapWei: bigint
               let softcapWei: bigint
-              let priceWei: bigint
               try {
                 hardcapWei = parseEther(hardcap || '0')
                 softcapWei = parseEther(softcap || '0')
-                priceWei = parseEther(price || '0')
               } catch {
-                return '请先输入有效的硬顶、软顶和预售价格'
+                return '请先输入有效的硬顶和软顶'
               }
               if (hardcapWei <= 0n) return '请先输入有效的硬顶金额'
-              if (priceWei <= 0n) return '请先输入有效的预售价格'
+              const priceWei = calculatePresaleTokenPrice(
+                hardcapWei,
+                presaleShare,
+              )
+              if (!priceWei) return '预售总量读取中，请稍后重试'
               if (maxBuyBnbWei > hardcapWei)
                 return '单钱包认购上限不能超过硬顶'
 
@@ -521,10 +519,18 @@ export function PresaleForm({
           )}
         </form.Field>
 
-        <form.Subscribe selector={(state) => state.values.presaleTokenPrice}>
-          {(presaleTokenPrice) => {
-            const hasPrice =
-              Boolean(presaleTokenPrice) && Number(presaleTokenPrice) > 0
+        <form.Subscribe selector={(state) => state.values.hardcap}>
+          {(hardcap) => {
+            let presaleTokenPrice = ''
+            try {
+              const priceWei = calculatePresaleTokenPrice(
+                parseEther(hardcap || '0'),
+                presaleShare,
+              )
+              presaleTokenPrice = priceWei ? formatEther(priceWei) : ''
+            } catch {
+              presaleTokenPrice = ''
+            }
 
             return (
               <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#181a1d] px-3.5 py-1 text-xs">
@@ -585,7 +591,7 @@ export function PresaleForm({
                   </div>
                   <div className="flex items-baseline gap-1 text-right">
                     <span className="font-mono text-sm font-bold text-[#FFA546]">
-                      {hasPrice ? presaleTokenPrice : '--'}
+                      {presaleTokenPrice || '--'}
                     </span>
                     <span className="text-xs text-neutral-400">BNB</span>
                   </div>
@@ -619,17 +625,14 @@ export function PresaleForm({
         </form.Field>
 
         <form.Field
-          name="durationValue"
+          name="durationHours"
           validators={{
-            onChangeListenTo: ['durationUnit'],
-            onChange: ({ value, fieldApi }) => {
-              const unit = (fieldApi.form.getFieldValue('durationUnit') ||
-                '分钟') as DurationUnit
+            onChange: ({ value }) => {
               const n = Number(value)
               if (!value || Number.isNaN(n) || n <= 0) return '请输入认购时长'
-              const sec = (DURATION_UNITS[unit] ?? minutesToSeconds)(n)
+              const sec = hoursToSeconds(n)
               if (sec < DURATION_MIN_SEC || sec > DURATION_MAX_SEC)
-                return '认购时长须在 1 分钟至 30 天之间'
+                return '认购时长须在 1 至 90 小时之间'
               return undefined
             },
           }}
@@ -639,51 +642,23 @@ export function PresaleForm({
               label="认购时长"
               required
             >
-              <form.Subscribe
-                selector={(state) =>
-                  (state.values.durationUnit || '分钟') as DurationUnit
+              <UnitInput
+                id={field.name}
+                name={field.name}
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder=""
+                value={field.state.value}
+                onChange={(e) =>
+                  field.handleChange(sanitizeIntInput(e.target.value))
                 }
-              >
-                {(unit) => (
-                  <>
-                    <UnitInput
-                      id={field.name}
-                      name={field.name}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder=""
-                      value={field.state.value}
-                      onChange={(e) =>
-                        field.handleChange(sanitizeIntInput(e.target.value))
-                      }
-                      onBlur={field.handleBlur}
-                      unit={unit}
-                    />
-                    <FieldInfo field={field} />
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      {(Object.keys(DURATION_UNITS) as DurationUnit[]).map(
-                        (u) => (
-                          <button
-                            key={u}
-                            type="button"
-                            onClick={() =>
-                              form.setFieldValue('durationUnit', u)
-                            }
-                            className={cn(
-                              'flex h-9 cursor-pointer items-center justify-center border text-xs font-semibold transition-all select-none',
-                              unit === u
-                                ? 'border-[#FE810B] bg-[#FE810B]/15 text-[#FFA546]'
-                                : 'border-[#2F3737] bg-[#1a1c1e] text-neutral-300 hover:border-[#FE810B]/50 hover:text-white',
-                            )}
-                          >
-                            {u}
-                          </button>
-                        ),
-                      )}
-                    </div>
-                  </>
-                )}
-              </form.Subscribe>
+                onBlur={field.handleBlur}
+                unit="小时"
+              />
+              <FieldInfo field={field} />
+              <p className="mt-1 text-xs text-neutral-500">
+                认购时长须在 1 至 90 小时之间
+              </p>
             </FieldWrap>
           )}
         </form.Field>
@@ -693,12 +668,12 @@ export function PresaleForm({
         <FormSectionTitle title="锁仓释放" required />
 
         <form.Field
-          name="vestingDelay"
+          name="vestingDelayMinutes"
           validators={{
             onChange: ({ value }) => {
               const n = Number(value)
-              if (!value || !Number.isInteger(n) || n < 7 || n > 90)
-                return '释放周期须在 7 至 90 天之间'
+              if (!value || !Number.isInteger(n) || n < 5 || n > 30)
+                return '释放周期须在 5 至 30 分钟之间'
               return undefined
             },
           }}
@@ -718,11 +693,13 @@ export function PresaleForm({
                 onChange={(e) =>
                   field.handleChange(sanitizeIntInput(e.target.value))
                 }
-                      onBlur={field.handleBlur}
-
-                unit="天"
+                onBlur={field.handleBlur}
+                unit="分钟"
               />
               <FieldInfo field={field} />
+              <p className="mt-1 text-xs text-neutral-500">
+                释放周期须在 5 至 30 分钟之间
+              </p>
             </FieldWrap>
           )}
         </form.Field>
@@ -773,7 +750,7 @@ export function PresaleForm({
         <form.Subscribe
           selector={(state) => ({
             rate: Number(state.values.vestingRate) || 5,
-            delay: Number(state.values.vestingDelay) || 7,
+            delay: Number(state.values.vestingDelayMinutes) || 5,
           })}
         >
           {({ rate, delay }) => {
@@ -790,7 +767,7 @@ export function PresaleForm({
                 <div className="flex items-center justify-between pt-2.5">
                   <span className="text-neutral-400">每轮释放</span>
                   <span className="font-mono font-semibold text-white">
-                    每 {delay} 天释放 {rate}%
+                    每 {delay} 分钟释放 {rate}%
                   </span>
                 </div>
               </div>
@@ -804,15 +781,25 @@ export function PresaleForm({
           selector={(state) => ({
             creatorBuyBnb: state.values.creatorBuyBnb,
             creatorBuyTokens: state.values.creatorBuyTokens,
-            presaleTokenPrice: state.values.presaleTokenPrice,
             hardcap: state.values.hardcap,
           })}
         >
-          {({ creatorBuyBnb, creatorBuyTokens, presaleTokenPrice, hardcap }) => {
+          {({ creatorBuyBnb, creatorBuyTokens, hardcap }) => {
             const hardcapNum = Number(hardcap || 0)
-            // BNB 注资口径上限 = 开盘池 BNB（≈硬顶）的 1/3，恒定乘积下恰为买走 25% 池代币
+            let presaleTokenPrice = ''
+            try {
+              const priceWei = calculatePresaleTokenPrice(
+                parseEther(hardcap || '0'),
+                presaleShare,
+              )
+              presaleTokenPrice = priceWei ? formatEther(priceWei) : ''
+            } catch {
+              presaleTokenPrice = ''
+            }
+            // BNB 注资口径上限 = 开盘池 BNB（≈硬顶）× 500/9500 ≈ 1/19，
+            // 恒定乘积下恰为买走 5% 池代币的花费（合约 MAX_CREATOR_BUY_POOL_BPS = 500）
             const maxCreatorBuyBnb =
-              hardcapNum > 0 ? Number((hardcapNum / 3).toFixed(4)) : 0
+              hardcapNum > 0 ? Number((hardcapNum / 19).toFixed(4)) : 0
             // 开盘池价（BNB/枚 = 硬顶 / 池份额），仅用于创建者购买的换算预估
             const poolTokenPriceBnb =
               hardcapNum > 0 && poolShareNum > 0 ? hardcapNum / poolShareNum : 0
@@ -844,7 +831,6 @@ export function PresaleForm({
               Boolean(
                 state.values.hardcap &&
                   state.values.softcap &&
-                  state.values.presaleTokenPrice &&
                   state.values.maxBuyBnb &&
                   state.values.startTime,
               ),
@@ -854,7 +840,7 @@ export function PresaleForm({
           {({ canSubmit, isSubmitting }) => (
             <Web3ActionButton
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || presaleShare <= 0n}
               loading={isSubmitting}
               loadingText="保存中…"
               className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-base font-bold text-white [clip-path:polygon(10px_0,100%_0,100%_calc(100%-10px),calc(100%-10px)_100%,0_100%,0_10px)] transition-[transform,opacity] active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFA546]"

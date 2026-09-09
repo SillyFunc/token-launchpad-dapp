@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useConfig, useConnection, useReadContract, useWatchContractEvent } from 'wagmi'
+import { useConfig, useConnection, useReadContract } from 'wagmi'
+import { readContract } from '@wagmi/core'
 import { useNavigate } from 'react-router'
-import { writeContract, waitForTransactionReceipt } from '@wagmi/core'
-import { formatEther, isAddress, type Hex } from 'viem'
+import { formatEther, isAddress, zeroAddress, type Hex } from 'viem'
 import {
   Coins,
   Copy,
@@ -22,7 +22,9 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 
-import type { TokenDetail } from '@/api/token'
+import { parseTxHash, type TokenDetail } from '@/api/token'
+import { requestAuthSignature } from '@/api/auth'
+import { useCreateToken } from '@/hooks/use-coordinator'
 import {
   Card,
   CardHeader,
@@ -50,6 +52,7 @@ import {
 } from '@/lib/format'
 import { CoordinatorFactoryAbi, PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
+import { sendContractTx } from '@/lib/contract-tx'
 import { useLocale } from '@/lib/i18n'
 import {
   useTokenGate,
@@ -115,9 +118,12 @@ function TwitterIcon({ className }: { className?: string }) {
 export interface TokenCardProps {
   token: TokenDetail
   onEdit: (token: TokenDetail) => void
-  onPresale: (token: TokenDetail) => void
-  onOpenPresale: (token: TokenDetail) => void
-  onLaunch: (token: TokenDetail) => void
+  /** 进入预售配置，地址来自链上查询或发行交易回执，不依赖后端解析 */
+  onPresale: (token: TokenDetail, tokenAddress: Hex) => void
+  /** 预售已在链上开启 */
+  onPresaleOpened: (token: TokenDetail) => void
+  /** 代币已上链，回传部署出的代币地址 */
+  onIssued: (token: TokenDetail, tokenAddress: Hex) => void
   onClaim: (token: TokenDetail) => void
 }
 
@@ -125,15 +131,20 @@ export function TokenCard({
   token,
   onEdit,
   onPresale,
-  onOpenPresale,
-  onLaunch,
+  onPresaleOpened,
+  onIssued,
   onClaim,
 }: TokenCardProps) {
   const { locale } = useLocale()
   const navigate = useNavigate()
   const config = useConfig()
   const queryClient = useQueryClient()
+  const { execute: createToken } = useCreateToken()
   const [copied, setCopied] = useState(false)
+  // 发行交易回执中的 TokenPresalePairCreated.token 是刚部署地址的即时权威来源
+  const [issuedAddress, setIssuedAddress] = useState<Hex | null>(null)
+  const [isIssuing, setIsIssuing] = useState(false)
+  const [isOpeningPresale, setIsOpeningPresale] = useState(false)
   const [isClaiming, setIsClaiming] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [isEndConfirmOpen, setIsEndConfirmOpen] = useState(false)
@@ -145,7 +156,7 @@ export function TokenCard({
   const creatorWallet = (token.creatorAddress || token.address || userAddress) as Hex | undefined
 
   // 1. 从合约 CoordinatorFactory.getTokenPresalePairsByCreator 获取该创建者在链上的真实代币
-  const { data: creatorPairsData, refetch: refetchCreatorPairs } = useReadContract({
+  const { data: creatorPairsData } = useReadContract({
     address: coordinatorAddress,
     abi: CoordinatorFactoryAbi,
     functionName: 'getTokenPresalePairsByCreator',
@@ -160,75 +171,33 @@ export function TokenCard({
     },
   })
 
-  // 监听新代币创建事件，自动刷新该创建者代币对
-  useWatchContractEvent({
-    address: coordinatorAddress,
-    abi: CoordinatorFactoryAbi,
-    eventName: 'TokenPresalePairCreated',
-    chainId: DEFAULT_CHAIN_ID,
-    onLogs: () => {
-      void refetchCreatorPairs()
-    },
-  })
-
-  // 2. 权威代币合约地址：从合约获取（仅当链上已确认部署时返回权威地址，草稿态返回空字符串）
+  // 2. 权威代币合约地址：优先使用当前发行交易回执，其次从 Coordinator 链上列表核验。
+  // 后端 coinContractAddress 只兼容已同步的历史记录，不参与刚发行后的即时链路。
   const tokenAddress = useMemo(() => {
-    // 从链上已部署列表中核验匹配
-    if (Array.isArray(creatorPairsData) && creatorPairsData.length > 0) {
-      // 路径 A: 如果有 salt，看预测出的地址是否匹配链上已部署的记录
-      if (token.salt) {
-        try {
-          const predicted = predictTokenAddress(token.salt as Hex)
-          const match = creatorPairsData.find(
-            (p) => p.tokenAddress.toLowerCase() === predicted.toLowerCase(),
-          )
-          if (match) return match.tokenAddress as Hex
-        } catch {
-          void 0
-        }
-      }
+    if (issuedAddress) return issuedAddress
 
-      // 路径 B: 依据后端已有 coinContractAddress 匹配链上权威地址
-      if (
-        token.coinContractAddress &&
-        isAddress(String(token.coinContractAddress))
-      ) {
-        const match = creatorPairsData.find(
-          (p) =>
-            p.tokenAddress.toLowerCase() ===
-            String(token.coinContractAddress).toLowerCase(),
-        )
-        if (match) return match.tokenAddress as Hex
-      }
-
-      // 路径 C: 依据名称和符号在链上已部署列表中匹配
-      if (token.name && token.symbol) {
-        const match = creatorPairsData.find(
-          (p) =>
-            p.tokenSymbol.trim().toLowerCase() ===
-              token.symbol.trim().toLowerCase() &&
-            p.tokenName.trim().toLowerCase() === token.name.trim().toLowerCase(),
-        )
-        if (match) return match.tokenAddress as Hex
+    // salt 可在本地确定性推导 CREATE2 地址，是否已发行再由 useTokenGate.tokenExists 链上确认
+    if (token.salt) {
+      try {
+        return predictTokenAddress(token.salt as Hex)
+      } catch {
+        void 0
       }
     }
 
-    // 路径 D: 兜底使用后端已有合法 EVM 地址（若存在）
-    if (
-      token.coinContractAddress &&
-      isAddress(String(token.coinContractAddress))
-    ) {
-      return token.coinContractAddress as Hex
+    // 兼容没有 salt 的历史草稿：只在 Coordinator 链上创建列表中按名称和符号匹配
+    if (Array.isArray(creatorPairsData) && token.name && token.symbol) {
+      const match = creatorPairsData.find(
+        (pair) =>
+          pair.tokenSymbol.trim().toLowerCase() ===
+            token.symbol.trim().toLowerCase() &&
+          pair.tokenName.trim().toLowerCase() === token.name.trim().toLowerCase(),
+      )
+      if (match) return match.tokenAddress as Hex
     }
 
     return ''
-  }, [
-    creatorPairsData,
-    token.salt,
-    token.symbol,
-    token.name,
-    token.coinContractAddress,
-  ])
+  }, [issuedAddress, creatorPairsData, token.salt, token.symbol, token.name])
 
   // 统一代币门禁守卫（注入从合约解析出的权威 tokenAddress）
   const {
@@ -254,9 +223,12 @@ export function TokenCard({
     canSetupPresale,
     canEndPresale,
     canLaunch,
+    isCreator,
   } = useTokenGate({
     token,
     tokenAddress: tokenAddress || undefined,
+    // 发行回执到达后绕过发行前 tokenExists=false 的缓存，直接重读 Coordinator
+    fresh: Boolean(issuedAddress),
   })
 
   const bnbAccumulatedNum = Number(formatEther(bnbAccumulated))
@@ -343,13 +315,13 @@ export function TokenCard({
 
     setIsClaiming(true)
     try {
-      const hash = await writeContract(config, {
+      await sendContractTx(config, {
         address: presaleAddress,
         abi: PresaleAbi,
         functionName: 'claimAllTokens',
+        account: userAddress,
         chainId: DEFAULT_CHAIN_ID,
       })
-      await waitForTransactionReceipt(config, { hash, chainId: DEFAULT_CHAIN_ID })
       queryClient.invalidateQueries()
       toast.success('请关注您钱包里的代币余额', '领取成功')
       onClaim(token)
@@ -361,10 +333,77 @@ export function TokenCard({
   }
 
   const handlePresaleClick = () => {
+    if (!tokenAddress) {
+      toast.warning('正在同步链上代币地址，请稍后重试')
+      return
+    }
     if (!canSetupPresale.allowed && canSetupPresale.reason) {
       toast.warning(canSetupPresale.reason)
     }
-    onPresale(token)
+    onPresale(token, tokenAddress)
+  }
+
+  const handleOpenPresale = async (account: Hex) => {
+    setIsOpeningPresale(true)
+    try {
+      const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+
+      // 优先使用 gate 解析结果，列表读取时序未完成时直读 Coordinator 兜底
+      let escrow = presaleAddress
+      if (!escrow && tokenAddress && isAddress(tokenAddress)) {
+        const onChainEscrow = (await readContract(config, {
+          address: coordinator,
+          abi: CoordinatorFactoryAbi,
+          functionName: 'tokenPresales',
+          args: [tokenAddress],
+          chainId: DEFAULT_CHAIN_ID,
+        })) as string
+        if (isAddress(onChainEscrow) && onChainEscrow !== zeroAddress) {
+          escrow = onChainEscrow.toLowerCase() as Hex
+        }
+      }
+
+      if (!escrow) {
+        toast.error('未在链上找到该代币的托管仓，请确认代币已在链上发行', '开启失败')
+        return
+      }
+
+      let isConfiguredOnChain = presaleConfigured
+      try {
+        isConfiguredOnChain = (await readContract(config, {
+          address: coordinator,
+          abi: CoordinatorFactoryAbi,
+          functionName: 'tokenConfigured',
+          args: [tokenAddress as Hex],
+          chainId: DEFAULT_CHAIN_ID,
+        })) as boolean
+      } catch (readErr) {
+        console.warn('Read tokenConfigured failed:', readErr)
+      }
+
+      if (!isConfiguredOnChain) {
+        toast.warning('请先配置预售条款后再开启预售')
+        onPresale(token, tokenAddress as Hex)
+        return
+      }
+
+      await sendContractTx(config, {
+        address: escrow,
+        abi: PresaleAbi,
+        functionName: 'openPresale',
+        account,
+        chainId: DEFAULT_CHAIN_ID,
+        gas: 150_000n,
+      })
+
+      await queryClient.invalidateQueries()
+      toast.success('预售已成功开启！现已开放散户认购')
+      onPresaleOpened(token)
+    } catch (err: unknown) {
+      toast.error(parseContractError(err), '开启失败')
+    } finally {
+      setIsOpeningPresale(false)
+    }
   }
 
   const handleEndPresale = async () => {
@@ -378,14 +417,11 @@ export function TokenCard({
 
     setIsEnding(true)
     try {
-      const hash = await writeContract(config, {
+      await sendContractTx(config, {
         address: presaleAddress,
         abi: PresaleAbi,
         functionName: 'endPresale',
-        chainId: DEFAULT_CHAIN_ID,
-      })
-      await waitForTransactionReceipt(config, {
-        hash,
+        account: userAddress,
         chainId: DEFAULT_CHAIN_ID,
       })
       queryClient.invalidateQueries()
@@ -402,6 +438,46 @@ export function TokenCard({
     }
   }
 
+  // 草稿上链：草稿保存的盐决定代币地址（预留地址需用锁定时的原盐通过 NotReserver 校验），
+  // 无盐时由 useCreateToken 现场搜盐
+  const handleIssueToken = async (account: Hex) => {
+    if (!canIssue.allowed) {
+      toast.error(canIssue.reason || '当前代币不可发行')
+      return
+    }
+
+    setIsIssuing(true)
+    try {
+      const auth = await requestAuthSignature(config, account)
+      const result = await createToken({
+        name: token.name,
+        symbol: token.symbol,
+        meta: token.meta || token.zhIntroduction || '',
+        buyTax: token.buyTax ?? 0,
+        sellTax: token.sellTax ?? 0,
+        feeRecipient: (token.feeRecipient as Hex) || zeroAddress,
+        taxDurationDays: Number(token.taxDuration) || 30,
+        antiFarmerDurationDays: Number(token.antiFarmerDuration) || 0,
+        salt: token.salt ? (token.salt as Hex) : undefined,
+      })
+
+      // 交易回执事件已给出权威地址，立即更新 UI；后端解析异步进行，不阻塞预售入口
+      setIssuedAddress(result.tokenAddress)
+      toast.success('代币发行成功！')
+      onIssued(token, result.tokenAddress)
+
+      if (token.id) {
+        void parseTxHash({ id: token.id, hash: result.txHash, ...auth }).catch(
+          (error) => console.error('Failed to sync tx hash to backend', error),
+        )
+      }
+    } catch (err: unknown) {
+      toast.error(parseContractError(err, '发行失败，请稍后重试'), '发行失败')
+    } finally {
+      setIsIssuing(false)
+    }
+  }
+
   const handleLaunchPool = async () => {
     if (!canLaunch.allowed) {
       toast.error('当前状态不可开盘加池')
@@ -411,14 +487,11 @@ export function TokenCard({
 
     setIsLaunching(true)
     try {
-      const hash = await writeContract(config, {
+      await sendContractTx(config, {
         address: presaleAddress,
         abi: PresaleAbi,
         functionName: 'launch',
-        chainId: DEFAULT_CHAIN_ID,
-      })
-      await waitForTransactionReceipt(config, {
-        hash,
+        account: userAddress,
         chainId: DEFAULT_CHAIN_ID,
       })
       queryClient.invalidateQueries()
@@ -430,7 +503,7 @@ export function TokenCard({
     }
   }
 
-  const handleRelaunchPresale = async () => {
+  const handleRelaunchPresale = async (account: Hex) => {
     if (!presaleAddress) {
       toast.error('未找到预售托管仓地址')
       return
@@ -439,18 +512,21 @@ export function TokenCard({
       toast.warning('等待全部认购者退款后才能重开预售')
       return
     }
+    if (!isCreator) {
+      toast.error('当前连接的钱包不是该代币的创建者，无法重开预售')
+      return
+    }
 
     setIsRelaunching(true)
     try {
-      const hash = await writeContract(config, {
+      await sendContractTx(config, {
         address: presaleAddress,
         abi: PresaleAbi,
         functionName: 'relaunchPresale',
+        account,
         chainId: DEFAULT_CHAIN_ID,
-      })
-      await waitForTransactionReceipt(config, {
-        hash,
-        chainId: DEFAULT_CHAIN_ID,
+        // 合约实测约 24k，留足余量以绕过钱包节点偶发的错误估算。
+        gas: 80_000n,
       })
       queryClient.invalidateQueries()
       toast.success('预售状态已成功重置！正在前往重开预售界面配置条款…')
@@ -795,22 +871,18 @@ export function TokenCard({
                     <Edit3 />
                     <span>编辑代币信息</span>
                   </Button>
-                  <Button
+                  <Web3ActionButton
                     type="button"
                     size="default"
-                    onClick={() => {
-                      if (!canIssue.allowed) {
-                        toast.error(canIssue.reason || '无法发行代币')
-                        return
-                      }
-                      onLaunch(token)
-                    }}
+                    onAction={handleIssueToken}
                     disabled={!canIssue.allowed}
+                    loading={isIssuing}
+                    loadingText="发行中…"
                     className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-50"
                   >
                     <Rocket />
                     <span>我要发行</span>
-                  </Button>
+                  </Web3ActionButton>
                 </>
               )
 
@@ -873,15 +945,17 @@ export function TokenCard({
                       <span>配置预售条款</span>
                     </Button>
                   )}
-                  <Button
+                  <Web3ActionButton
                     type="button"
                     size="default"
-                    onClick={() => onOpenPresale(token)}
-                    className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 cursor-pointer"
+                    onAction={handleOpenPresale}
+                    loading={isOpeningPresale}
+                    loadingText="开启中…"
+                    className="cursor-pointer border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
                   >
                     <Rocket className="size-4 mr-1" />
                     <span>开启预售</span>
-                  </Button>
+                  </Web3ActionButton>
                 </>
               )
 
@@ -940,28 +1014,21 @@ export function TokenCard({
                       BNB
                     </span>
                   </div>
-                  <Button
+                  <Web3ActionButton
                     type="button"
                     size="default"
-                    onClick={handleRelaunchPresale}
+                    onAction={handleRelaunchPresale}
                     disabled={bnbAccumulated > 0n || isRelaunching}
+                    loading={isRelaunching}
+                    loadingText="正在重置预售状态…"
                     title={
                       bnbAccumulated > 0n ? '等待全部认购者退款' : undefined
                     }
                     className="border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5 disabled:opacity-40 cursor-pointer"
                   >
-                    {isRelaunching ? (
-                      <>
-                        <Loader2 className="size-4 animate-spin mr-1.5" />
-                        <span>正在重置预售状态…</span>
-                      </>
-                    ) : (
-                      <>
-                        <Rocket className="size-4 mr-1.5" />
-                        <span>重开预售</span>
-                      </>
-                    )}
-                  </Button>
+                    <Rocket className="size-4 mr-1.5" />
+                    <span>重开预售</span>
+                  </Web3ActionButton>
                 </div>
               )
 

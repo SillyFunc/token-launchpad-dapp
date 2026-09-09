@@ -16,8 +16,8 @@ if (!walletConnectProjectId) {
 
 /**
  * 单链 transport 构建策略：HTTP 节点在前（读数是请求-响应，低延迟、无需握手，
- * 按 network.ts 列表顺序依次故障切换），WS 殿后——HTTP transport 不支持事件订阅，
- * fallback 遇到订阅类请求（watchContractEvent 等）会自动路由到列表里的 WS。
+ * 按 network.ts 列表顺序依次故障切换），WS 殿后。事件监听处显式设置 poll: false，
+ * 使 Viem 选择该 WS transport；否则 HTTP-first fallback 会按链的出块时间高频轮询。
  */
 function chainTransports(chainId: keyof typeof CHAINS_CONFIG) {
   const { http: httpUrls, webSocket: wsUrls } = CHAINS_CONFIG[chainId].rpcUrls

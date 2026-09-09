@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState, useRef, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
@@ -7,9 +7,15 @@ import { useConfig, useConnection } from 'wagmi'
 import { ArrowRight } from 'lucide-react'
 
 import { FormSectionTitle } from '@/components/common/form-section-title'
+import { FormInput } from '@/components/common/form-input'
 import { TaxSlider } from '@/components/common/tax-slider'
 import { FieldInfo } from '@/components/common/field-info'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
+import {
+  ReservedAddressSelect,
+  useReservedAddressOptions,
+  type ReservedAddressOption,
+} from '@/components/launch/reserved-address-select'
 import { toast } from '@/components/ui/toast'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
 import {
@@ -87,6 +93,16 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // 草稿保存的盐若是某个预留地址的盐，编辑时预选该地址；否则视为自动生成的盐
+  const { data: reservedOptions } = useReservedAddressOptions()
+  const initialReservedAddress = useMemo(
+    () =>
+      (initialData?.salt &&
+        reservedOptions?.find((item) => item.salt === initialData.salt)) ||
+      null,
+    [initialData?.salt, reservedOptions],
+  )
+
   // 预览用 objectURL，组件卸载时释放
   useEffect(
     () => () => {
@@ -97,7 +113,8 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
     [logoPreview],
   )
 
-  // 表单状态管理：以 initialData 真实数据完整初始化
+  // 表单状态管理：以 initialData 真实数据完整初始化；
+  // 预留列表异步到达后 defaultValues 变化，TanStack Form 会在表单未被触碰时同步进来
   const form = useForm({
     defaultValues: {
       name: initialData?.name ?? '',
@@ -108,6 +125,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
       sellTax: initialData?.sellTax ?? 0,
       taxDuration: String(initialData?.taxDuration ?? '30'),
       antiFarmerDuration: String(initialData?.antiFarmerDuration ?? '0'),
+      reservedAddress: initialReservedAddress as ReservedAddressOption | null,
       links: {
         telegram: initialData?.telegram ?? '',
         twitter: initialData?.twitter ?? '',
@@ -126,10 +144,25 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
       if (!address) return
 
       try {
-        // 平台代币地址强制 8888 尾号：创建前先本地搜盐，随表单交由后端保存；
-        // 搜盐失败必须终止保存（不发请求、不唤起签名），避免落库的代币无法对齐链上地址
+        // 平台代币地址强制 8888 尾号：保存前确定盐值，随表单交由后端保存；
+        // 搜盐失败必须终止保存（不发请求、不唤起签名），避免落库的代币无法对齐链上地址。
+        // 选择了预留地址则使用其锁定时的盐（链上 NotReserver 校验要求原盐）；
+        // 编辑模式下代币尚未上链，同样允许更换：未选预留时若草稿原盐属于自动生成则沿用，
+        // 若原盐是某个预留地址的盐（用户刚取消选择）则必须重新生成，否则会误占预留地址。
+        if (value.reservedAddress?.used) {
+          toast.error('所选预留地址已用于创建代币，请重新选择')
+          return
+        }
         let createSalt: string | undefined
-        if (!isEditMode) {
+        if (value.reservedAddress) {
+          createSalt = value.reservedAddress.salt
+        } else if (
+          isEditMode &&
+          initialData?.salt &&
+          !reservedOptions?.some((item) => item.salt === initialData.salt)
+        ) {
+          createSalt = initialData.salt
+        } else {
           try {
             createSalt = (await findVanitySalt()).salt
           } catch {
@@ -161,6 +194,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             website: value.links.website?.trim() ?? '',
             telegram: value.links.telegram?.trim() ?? '',
             twitter: value.links.twitter?.trim() ?? '',
+            salt: createSalt,
             ...auth,
           })
           toast.success('代币信息修改已保存！')
@@ -247,23 +281,21 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
       </div>
 
       <div className="flex flex-col rounded border border-[#484b51] bg-[#131516]">
-        {!isEditMode && (
-          <div className="flex items-center justify-between gap-3 border-b border-b-[#484b51] p-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold text-white">保留您的代币 CA</div>
-              <div className="mt-1 text-xs text-neutral-500">
-                在发布前锁定您的代币合约的地址。
-              </div>
+        <div className="flex items-center justify-between gap-3 border-b border-b-[#484b51] p-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-white">保留您的代币 CA</div>
+            <div className="mt-1 text-xs text-neutral-500">
+              在发布前锁定您的代币合约的地址。
             </div>
-            <Link
-              to="/prelaunch"
-              className="flex shrink-0 items-center justify-center whitespace-nowrap rounded border border-[#ffd98c] px-4 py-2 text-xs font-semibold text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black sm:px-6 sm:py-2.5"
-            >
-              <span>保留 CA</span>
-              <ArrowRight className="ml-1.5 size-3 shrink-0" />
-            </Link>
           </div>
-        )}
+          <Link
+            to="/prelaunch"
+            className="flex shrink-0 items-center justify-center whitespace-nowrap rounded border border-[#ffd98c] px-4 py-2 text-xs font-semibold text-[#ffd98c] transition-colors hover:bg-[#ffd98c] hover:text-black sm:px-6 sm:py-2.5"
+          >
+            <span>保留 CA</span>
+            <ArrowRight className="ml-1.5 size-3 shrink-0" />
+          </Link>
+        </div>
 
         <div className="flex flex-col space-y-10 p-4">
           <div className="flex flex-col gap-6">
@@ -364,6 +396,18 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
               </div>
             </div>
 
+            <form.Field name="reservedAddress">
+              {(field) => (
+                <ReservedAddressSelect
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  onBlur={field.handleBlur}
+                />
+              )}
+            </form.Field>
+
             <form.Field
               name="name"
               validators={{ onMount: nameSchema, onChange: nameSchema }}
@@ -376,7 +420,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     </label>
                     <span className="text-xs text-[#f7594b]">*</span>
                   </div>
-                  <input
+                  <FormInput
                     id={field.name}
                     name={field.name}
                     type="text"
@@ -389,7 +433,6 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     onChange={(e) =>
                       field.handleChange(e.target.value.slice(0, 24))
                     }
-                    className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                   />
                 </div>
               )}
@@ -407,7 +450,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     </label>
                     <span className="text-xs text-[#f7594b]">*</span>
                   </div>
-                  <input
+                  <FormInput
                     id={field.name}
                     name={field.name}
                     type="text"
@@ -420,7 +463,6 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     onChange={(e) =>
                       field.handleChange(e.target.value.slice(0, 15))
                     }
-                    className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                   />
                 </div>
               )}
@@ -447,7 +489,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
                     rows={4}
-                    className="w-full resize-none p-3 min-h-30 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
+                    className="box-border min-h-30 w-full appearance-none resize-none rounded-xs border border-[#84888c] bg-transparent p-3 text-sm text-white placeholder:text-[#84888c] focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               )}
@@ -499,24 +541,19 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             >
               {(field) => (
                 <div className="flex flex-col mt-4">
-                  <div className="relative">
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) =>
-                        field.handleChange(sanitizeDaysInput(e.target.value))
-                      }
-                      className="w-full h-10.5 pl-3 pr-10 text-sm border border-[#84888c] bg-transparent rounded-xs text-white focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
-                    />
-                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-[#FE810B]">
-                      天
-                    </span>
-                  </div>
+                  <FormInput
+                    id={field.name}
+                    name={field.name}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) =>
+                      field.handleChange(sanitizeDaysInput(e.target.value))
+                    }
+                    rightAdornment="天"
+                  />
                   <FieldInfo field={field} />
                 </div>
               )}
@@ -534,7 +571,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             >
               {(field) => (
                 <div className="flex flex-col">
-                  <input
+                  <FormInput
                     id={field.name}
                     name={field.name}
                     type="text"
@@ -545,7 +582,6 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                   />
                   <FieldInfo field={field} />
                 </div>
@@ -583,24 +619,19 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             >
               {(field) => (
                 <div className="flex flex-col mt-4">
-                  <div className="relative">
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) =>
-                        field.handleChange(sanitizeDaysInput(e.target.value))
-                      }
-                      className="w-full h-10.5 pl-3 pr-10 text-sm border border-[#84888c] bg-transparent rounded-xs text-white focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
-                    />
-                    <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-semibold text-[#FE810B]">
-                      天
-                    </span>
-                  </div>
+                  <FormInput
+                    id={field.name}
+                    name={field.name}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) =>
+                      field.handleChange(sanitizeDaysInput(e.target.value))
+                    }
+                    rightAdornment="天"
+                  />
                   <FieldInfo field={field} />
                 </div>
               )}
@@ -629,7 +660,7 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                       >
                         {item.label}
                       </label>
-                      <input
+                      <FormInput
                         id={field.name}
                         name={field.name}
                         type="url"
@@ -640,7 +671,6 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
-                        className="w-full h-10.5 px-3 text-sm border border-[#84888c] bg-transparent rounded-xs text-white placeholder:text-[#84888c] file:border-0 file:bg-transparent focus-visible:outline-none focus-visible:border-transparent focus-visible:ring-1 focus-visible:ring-[#FE810B] disabled:cursor-not-allowed disabled:opacity-50 box-border appearance-none"
                       />
                     </div>
                   )}

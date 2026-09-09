@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useConnection } from 'wagmi'
-import { format } from 'date-fns'
-import { ExternalLink, Info, Loader2 } from 'lucide-react'
+import { useConfig, useConnection } from 'wagmi'
+import { ExternalLink, Info, Loader2, RefreshCcw } from 'lucide-react'
 
 import { PageBackTitle } from '@/components/common/page-back-title'
 import { SectionWrapper } from '@/components/prelaunch/section-wrapper'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toast'
+import { saveTokenSalt } from '@/api/token'
+import { requestAuthSignature } from '@/api/auth'
 import { getExplorerUrl } from '@/config/network'
+import { parseContractError } from '@/lib/contract-error'
 import {
   CoordinatorError,
   useReservationFee,
@@ -25,7 +28,14 @@ import { markSaltReserved } from '@/lib/reserved-salt-store'
 const gradientButtonClass =
   'max-w-50 text-sm font-semibold h-10 [clip-path:polygon(10px_0,100%_0,100%_calc(100%-10px),calc(100%-10px)_100%,0_100%,0_10px)] bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B]'
 
-/** 锁定失败错误码 → 文案（未命中走兜底文案，错误码来源见对接文档第 6 章） */
+const RESERVED_ADDRESS_STATUS = {
+  0: { label: '未使用', className: 'text-[#7adfa1]' },
+  1: { label: '已占用', className: 'text-[#FFA546]' },
+  2: { label: '已使用', className: 'text-[#84888c]' },
+} as const
+
+const RESERVED_ADDRESS_SKELETONS = [0, 1] as const
+
 const LOCK_ERROR_MESSAGES: Partial<Record<CoordinatorErrorCode, string>> = {
   USER_REJECTED: '用户已取消交易',
   INSUFFICIENT_FUNDS: '钱包 tBNB 余额不足，无法支付预留费',
@@ -42,11 +52,15 @@ function toLockErrorMessage(err: unknown): string {
   if (err instanceof CoordinatorError) {
     return LOCK_ERROR_MESSAGES[err.code] ?? '锁定失败，请稍后重试'
   }
-  return err instanceof Error ? err.message : '锁定失败，请稍后重试'
+  // 鉴权签名等钱包底层错误（含用户取消签名）统一走合约错误解析
+  if (err instanceof Error)
+    return parseContractError(err, '锁定失败，请稍后重试')
+  return '锁定失败，请稍后重试'
 }
 
 export const Prelaunch = () => {
   const nav = useNavigate()
+  const config = useConfig()
   const { address } = useConnection()
   const { formattedFee: reservationFee } = useReservationFee()
   const { execute: reserveTokenAddress } = useReserveTokenAddress()
@@ -81,15 +95,23 @@ export const Prelaunch = () => {
   const canLock = Boolean(salt && predictedAddress && address) && !isReserving
 
   const handleLock = async () => {
-    if (!salt || !predictedAddress) return
+    if (!salt || !predictedAddress || !address) return
 
     setIsReserving(true)
     try {
+      const auth = await requestAuthSignature(config, address)
       const { hash } = await reserveTokenAddress(salt)
       markSaltReserved(salt, predictedAddress, hash)
+      await saveTokenSalt({
+        contractAddress: predictedAddress,
+        salt,
+        txHash: hash,
+        address: auth.address,
+        message: auth.message,
+        signature: auth.signature,
+      })
       toast.success('地址已锁定并归属当前钱包，可随时用于发布代币', '锁定成功')
       refetch()
-      // 锁定成功后清空输入框回显，回到未生成状态（盐值已存档，供后续发布代币使用）
       resetSalt()
     } catch (err) {
       toast.error(toLockErrorMessage(err), '锁定失败')
@@ -164,12 +186,17 @@ export const Prelaunch = () => {
               <Button
                 onClick={() => refetch()}
                 disabled={isFetching || !address}
-                className="text-xs text-white border border-[#84888c] bg-transparent h-8 px-6 [clip-path:polygon(10px_0,100%_0,100%_calc(100%-10px),calc(100%-10px)_100%,0_100%,0_10px)] shrink-0"
+                className="border border-[#84888c] bg-transparent h-8 px-4 shrink-0 flex items-center"
               >
                 {isFetching ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
-                  '重新整理'
+                  <>
+                    <RefreshCcw className="size-3.5" />
+                    <span className="text-xs text-white leading-none">
+                      重新整理
+                    </span>
+                  </>
                 )}
               </Button>
             </div>
@@ -180,9 +207,18 @@ export const Prelaunch = () => {
                   请先连接钱包，查询您锁定的保留 CA。
                 </p>
               ) : isLoading ? (
-                <p className="py-6 text-center text-xs text-[#84888c]">
-                  正在从链上查询预留地址…
-                </p>
+                RESERVED_ADDRESS_SKELETONS.map((index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-3 border border-[#2f3737] bg-[#181a1d] px-3 py-2.5"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      <Skeleton className="h-4 w-full max-w-80" />
+                      <Skeleton className="h-3 w-12" />
+                    </div>
+                    <Skeleton className="h-4 w-12 shrink-0" />
+                  </div>
+                ))
               ) : reservedAddresses.length === 0 ? (
                 <p className="py-6 text-center text-xs text-[#84888c]">
                   暂无预留地址，锁定成功后将展示在此处。
@@ -193,14 +229,14 @@ export const Prelaunch = () => {
                     key={item.token}
                     className="flex items-center justify-between gap-3 border border-[#2f3737] bg-[#181a1d] px-3 py-2.5"
                   >
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate font-mono text-sm text-white">
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="break-all font-mono text-sm leading-5 text-white">
                         {item.token}
                       </span>
-                      <span className="text-xs text-[#84888c]">
-                        {item.reservedAt
-                          ? `锁定于 ${format(new Date(item.reservedAt), 'yyyy-MM-dd HH:mm:ss')}`
-                          : '已锁定'}
+                      <span
+                        className={`text-xs ${RESERVED_ADDRESS_STATUS[item.status].className}`}
+                      >
+                        {RESERVED_ADDRESS_STATUS[item.status].label}
                       </span>
                     </div>
                     <a

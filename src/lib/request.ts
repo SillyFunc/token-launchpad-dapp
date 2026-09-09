@@ -90,6 +90,15 @@ function unwrap<T>(res: ApiResponse<T>, silent = false): T {
   throw new ApiError(res.code, res.message || '业务请求失败')
 }
 
+export async function get<T>(
+  url: string,
+  params?: Record<string, unknown>,
+  config?: AxiosRequestConfig,
+): Promise<T> {
+  const res = await instance.get<ApiResponse<T>>(url, { params, ...config })
+  return unwrap(res.data, config?.silent)
+}
+
 export async function post<T>(
   url: string,
   data?: unknown,

@@ -39,6 +39,8 @@ export const Presale = () => {
   const { canSetupPresale } = useTokenGate({
     tokenAddress: effectiveAddress,
     token,
+    // URL 地址来自 Coordinator 链上列表或发行交易回执；挂载时绕过发行前缓存强制重读
+    fresh: true,
   })
 
   return (

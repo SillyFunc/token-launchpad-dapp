@@ -71,6 +71,7 @@ export function Web3ActionButton({
         type="button"
         variant={variant}
         size={size}
+        disabled={disabled}
         className={cn('font-bold', className)}
         onClick={(e) => {
           e.preventDefault()
@@ -90,7 +91,7 @@ export function Web3ActionButton({
         type="button"
         variant="outline"
         size={size}
-        disabled={isSwitching}
+        disabled={disabled || isSwitching}
         className={cn(
           'border-amber-500/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 hover:text-amber-200 font-bold',
           className,

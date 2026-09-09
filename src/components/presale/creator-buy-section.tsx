@@ -16,9 +16,9 @@ export interface CreatorBuySectionProps {
   creatorBuyTokens: string
   onChangeBnb: (val: string) => void
   onChangeTokens: (val: string) => void
-  /** BNB 注资口径上限 = 开盘池 BNB（≈硬顶）的 1/3 */
+  /** BNB 注资口径上限 = 开盘池 BNB（≈硬顶）× 500/9500 ≈ 1/19 */
   maxCreatorBuyBnb?: number
-  /** 代币口径上限 = 开盘池代币份额的 25%（合约常量 MAX_CREATOR_BUY_POOL_BPS = 2500） */
+  /** 代币口径上限 = 开盘池代币份额的 5%（合约常量 MAX_CREATOR_BUY_POOL_BPS = 500） */
   maxCreatorBuyTokens?: number
   /** 预售价格（BNB/枚）；未设置时禁用创建者购买输入 */
   presaleTokenPrice?: string

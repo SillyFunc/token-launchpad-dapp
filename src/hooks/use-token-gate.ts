@@ -91,6 +91,8 @@ export interface UseTokenGateOptions {
   creatorAddress?: string
   /** 是否开启链上事件实时监听（默认 false，建议仅在详情页开启，避免列表卡片开启过多监听） */
   watch?: boolean
+  /** 挂载时强制重读链上状态；用于发行后的目标页面，避免命中发行前的缓存 */
+  fresh?: boolean
 }
 
 export interface TokenGateResult {
@@ -177,6 +179,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const {
     data: coordinatorBatch,
     isLoading: isCoordinatorLoading,
+    isFetching: isCoordinatorFetching,
     isError: isCoordinatorError,
   } = useReadContracts({
     contracts: [
@@ -217,7 +220,11 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         chainId: DEFAULT_CHAIN_ID,
       },
     ],
-    query: { enabled: hasValidTokenAddress, staleTime: 30_000 },
+    query: {
+      enabled: hasValidTokenAddress,
+      staleTime: options?.fresh ? 0 : 30_000,
+      refetchOnMount: options?.fresh ? 'always' : true,
+    },
   })
 
   const tokenExistsData = coordinatorBatch?.[0]?.result as boolean | undefined
@@ -254,6 +261,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const {
     data: presaleBatch,
     isLoading: isPresaleLoading,
+    isFetching: isPresaleFetching,
     isError: isPresaleError,
     refetch: refetchPresaleBatch,
   } = useReadContracts({
@@ -339,7 +347,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     ],
     query: {
       enabled: hasPresaleContract,
-      staleTime: 30_000,
+      staleTime: options?.fresh ? 0 : 30_000,
+      refetchOnMount: options?.fresh ? 'always' : true,
     },
   })
 
@@ -367,6 +376,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     abi: PresaleAbi,
     chainId: DEFAULT_CHAIN_ID,
     enabled: Boolean(options?.watch) && hasPresaleContract,
+    // 实时页面使用 WebSocket 订阅，避免 HTTP-first fallback 按 BSC blockTime 高频轮询。
+    poll: false,
     onLogs: () => {
       void queryClient.invalidateQueries({
         queryKey: ['readContracts'],
@@ -382,7 +393,10 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const isIssued = Boolean(hasValidTokenAddress && tokenExistsData === true)
 
   const isChainLoading = hasValidTokenAddress
-    ? isCoordinatorLoading || (hasPresaleContract && isPresaleLoading)
+    ? isCoordinatorLoading ||
+      (Boolean(options?.fresh) && isCoordinatorFetching) ||
+      (hasPresaleContract &&
+        (isPresaleLoading || (Boolean(options?.fresh) && isPresaleFetching)))
     : false
 
   const isChainError = hasValidTokenAddress

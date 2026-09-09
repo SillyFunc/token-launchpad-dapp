@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Globe,
   Send,
-  Gift,
   AlertTriangle,
   TrendingUp,
   Loader2,
@@ -201,6 +200,22 @@ export function TokenDetailPage() {
     })
   const vestingStart = (vestingStartData as bigint | undefined) ?? 0n
 
+  // 用户通过 subscribe 实际认购的代币数量；创建者固定份额不计入单钱包限购
+  const { data: userSubscribedTokensData, refetch: refetchSubscribedTokens } =
+    useReadContract({
+      address: presaleAddress,
+      abi: PresaleAbi,
+      functionName: 'subscribedTokens',
+      args: userAddress ? [userAddress] : undefined,
+      chainId: DEFAULT_CHAIN_ID,
+      query: {
+        enabled: Boolean(presaleAddress && userAddress),
+        staleTime: 5_000,
+      },
+    })
+  const userSubscribedTokens =
+    (userSubscribedTokensData as bigint | undefined) ?? 0n
+
   // 用户认购支付记录（预售失败退款用）
   const { data: userContributionData, refetch: refetchContribution } =
     useReadContract({
@@ -296,8 +311,9 @@ export function TokenDetailPage() {
         })
       : '0'
 
-  // 单钱包限额换算与剩余额度（考虑累计认购与硬顶剩余）
-  const userPurchasedTokens = Number(formatEther(userShare))
+  // 单钱包限额只扣除 subscribe 的累计认购量；getUserVestingStatus.share 对创建者会额外
+  // 包含 creatorShare，不能用于此处，否则会错误压缩创建者的认购额度。
+  const userPurchasedTokens = Number(formatEther(userSubscribedTokens))
   const remainingTokensQuota =
     maxBuyNum > 0 ? Math.max(0, maxBuyNum - userPurchasedTokens) : 0
   const remainingMaxBnbQuota =
@@ -457,6 +473,7 @@ export function TokenDetailPage() {
 
       queryClient.invalidateQueries()
       void refetchVesting()
+      void refetchSubscribedTokens()
       setSubscribeAmount('')
       toast.success('认购成功！代币份额已锁定在托管仓')
     } catch (err: unknown) {
@@ -832,53 +849,6 @@ export function TokenDetailPage() {
           </div>
         </div>
       </div>
-
-      {/* 已开盘代币：顶部解锁倒计时与待领取提示横幅 */}
-      {presaleStatus === 3 && (
-        <div className="mb-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-[#FE810B]/40 bg-linear-to-r from-[#FE810B]/10 via-[#141517] to-[#141517] p-3.5 sm:p-4 text-xs">
-          <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#FE810B]/20 text-[#FE810B]">
-              <Clock className="size-4.5" />
-            </div>
-            <div className="flex flex-col justify-center min-w-0">
-              <span className="font-bold text-white text-sm leading-tight">
-                代币已开盘上线 · 线性解锁进行中
-              </span>
-              <span className="text-neutral-400 text-[11px] mt-0.5 truncate">
-                {userClaimable > 0n ? (
-                  <span className="text-emerald-400 font-semibold">
-                    ⚡ 您的钱包当前有 {formatEther(userClaimable)} {token?.symbol} 待领取
-                  </span>
-                ) : (
-                  '每个周期自动释放份额，可在下方查看解锁倒计时'
-                )}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center shrink-0 w-full sm:w-auto justify-end">
-            {userClaimable > 0n ? (
-              <button
-                type="button"
-                onClick={handleClaimVesting}
-                disabled={isClaimingVesting}
-                className="flex h-9 w-full sm:w-auto items-center justify-center gap-1.5 rounded-lg bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] px-4 text-xs font-bold text-white shadow-sm transition-transform active:translate-y-0.5 cursor-pointer disabled:opacity-50"
-              >
-                <Gift className="size-3.5" />
-                <span>{isClaimingVesting ? '领取中…' : '立即领取'}</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setActiveTab('vesting')}
-                className="flex h-9 w-full sm:w-auto items-center justify-center gap-1 rounded-md border border-[#484b51] bg-[#1a1c1e] px-4 text-xs font-medium text-neutral-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
-              >
-                <span>查看解锁详情</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* 分流展示：已开启预售代币展示 3 个 Tabs，未开启预售代币直接展示 DEX 行情与交易面板 */}
       {hasPresale ? (
