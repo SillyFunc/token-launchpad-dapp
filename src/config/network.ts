@@ -101,18 +101,17 @@ export const CHAINS_CONFIG: Record<56 | 97, ChainMetadata> = {
     shortName: 'BSC Mainnet',
     rpcUrls: {
       http: [
-        'https://binance.llamarpc.com',
+        // 'https://binance.llamarpc.com',
         'https://bsc-dataseed.binance.org/',
-        'https://1rpc.io/bnb',
+        // 'https://1rpc.io/bnb',
       ],
       webSocket: ['wss://bsc-rpc.publicnode.com'],
     },
     contracts: {
-      // 主网部署后更新以下占位
-      tokenFactory: '0x0000000000000000000000000000000000000000',
-      presaleFactory: '0x0000000000000000000000000000000000000000',
-      coordinatorFactory: '0x0000000000000000000000000000000000000000',
-      flapTaxTokenV3: '0x0000000000000000000000000000000000000000',
+      tokenFactory: '0x04556cBC53C9E994522b008B676958e715545564',
+      presaleFactory: '0x7A6B4da821F4b2aDB1432E06E7B7aD2f20972A1A',
+      coordinatorFactory: '0xc7284f96716E4FbB3F794CB407D882C29aA653B1',
+      flapTaxTokenV3: '0xd7E12EcD6406B993d94F0bC67A4a62681F50AA99',
       wbnb: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
       routerV2: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
     },
