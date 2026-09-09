@@ -26,6 +26,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
 import { KlineChart } from '@/components/common/kline-chart'
+import { VestingCountdown } from '@/components/presale/vesting-countdown'
 
 /** K 线调试用写死代币地址（Defined 为主网行情，我们的代币未上主网查不到） */
 const DEBUG_KLINE_TOKEN_ADDRESS =
@@ -84,6 +85,8 @@ export function TokenDetailPage() {
   const [isSubscribing, setIsSubscribing] = useState(false)
   const [isRefunding, setIsRefunding] = useState(false)
   const [isClaimingVesting, setIsClaimingVesting] = useState(false)
+  const [isEnforcingLaunchDeadline, setIsEnforcingLaunchDeadline] =
+    useState(false)
 
   // ① 后端代币详情
   const {
@@ -120,6 +123,22 @@ export function TokenDetailPage() {
     tokenAddress,
     token,
     watch: true,
+  })
+
+  // status=2 的开盘截止窗口由链上 endedAt + LAUNCH_DEADLINE 决定。
+  const { data: endedAtData } = useReadContract({
+    address: presaleAddress,
+    abi: PresaleAbi,
+    functionName: 'endedAt',
+    chainId: DEFAULT_CHAIN_ID,
+    query: { enabled: Boolean(presaleAddress), staleTime: 5_000 },
+  })
+  const { data: launchDeadlineData } = useReadContract({
+    address: presaleAddress,
+    abi: PresaleAbi,
+    functionName: 'LAUNCH_DEADLINE',
+    chainId: DEFAULT_CHAIN_ID,
+    query: { enabled: Boolean(presaleAddress), staleTime: Infinity },
   })
 
   // ③ 用户钱包 BNB 余额
@@ -168,6 +187,20 @@ export function TokenDetailPage() {
       | readonly [bigint, bigint, bigint, bigint]
       | undefined) ?? []
 
+  // 读取 Presale 合约的 vestingStart 启动时间戳
+  const { data: vestingStartData, refetch: refetchVestingStart } =
+    useReadContract({
+      address: presaleAddress,
+      abi: PresaleAbi,
+      functionName: 'vestingStart',
+      chainId: DEFAULT_CHAIN_ID,
+      query: {
+        enabled: Boolean(presaleAddress && presaleStatus === 3),
+        staleTime: 30_000,
+      },
+    })
+  const vestingStart = (vestingStartData as bigint | undefined) ?? 0n
+
   // 用户认购支付记录（预售失败退款用）
   const { data: userContributionData, refetch: refetchContribution } =
     useReadContract({
@@ -185,6 +218,13 @@ export function TokenDetailPage() {
 
   // ⑥ 价格行情数据 (WebSocket 实时订阅)
   const tokenPriceData = useTokenPrice(tokenAddress || '', totalSupply)
+
+  // 已开盘上线的代币：若当前处于预售 Tab 则自动切到「解锁」Tab
+  useEffect(() => {
+    if (presaleStatus === 3 && activeTab === 'presale') {
+      setActiveTab('vesting')
+    }
+  }, [presaleStatus])
 
   const handleCopy = () => {
     if (!tokenAddress) return
@@ -308,6 +348,16 @@ export function TokenDetailPage() {
   const countdownSeconds = isPresaleNotStarted
     ? Math.max(0, startTimeSeconds - nowSeconds)
     : Math.max(0, endTimeSeconds - nowSeconds)
+  const launchDeadlineAt =
+    presaleStatus === 2 && endedAtData !== undefined && launchDeadlineData !== undefined
+      ? Number(endedAtData as bigint) + Number(launchDeadlineData as bigint)
+      : null
+  const isLaunchWindowExpired =
+    launchDeadlineAt !== null && nowSeconds >= launchDeadlineAt
+  const launchWindowRemainingSeconds =
+    launchDeadlineAt === null
+      ? null
+      : Math.max(0, launchDeadlineAt - nowSeconds)
 
   const formatCountdown = (seconds: number) => {
     const days = Math.floor(seconds / 86400)
@@ -479,6 +529,34 @@ export function TokenDetailPage() {
       toast.error(parseContractError(err, '结束失败，请稍后重试'), '结束失败')
     } finally {
       setIsEndingPresale(false)
+    }
+  }
+
+  // 开盘窗口超时后，任何人都可以触发 status 2 → 4 并开放退款。
+  const handleEnforceLaunchDeadline = async () => {
+    if (!presaleAddress || !isLaunchWindowExpired) return
+
+    setIsEnforcingLaunchDeadline(true)
+    try {
+      const hash = await writeContract(config, {
+        address: presaleAddress,
+        abi: PresaleAbi,
+        functionName: 'enforceLaunchDeadline',
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      await waitForTransactionReceipt(config, {
+        hash,
+        chainId: DEFAULT_CHAIN_ID,
+      })
+      queryClient.invalidateQueries()
+      toast.success('已开启退款通道，认购者现可申请全额退款')
+    } catch (err: unknown) {
+      toast.error(
+        parseContractError(err, '开启退款通道失败，请稍后重试'),
+        '操作失败',
+      )
+    } finally {
+      setIsEnforcingLaunchDeadline(false)
     }
   }
 
@@ -755,10 +833,61 @@ export function TokenDetailPage() {
         </div>
       </div>
 
+      {/* 已开盘代币：顶部解锁倒计时与待领取提示横幅 */}
+      {presaleStatus === 3 && (
+        <div className="mb-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-[#FE810B]/40 bg-linear-to-r from-[#FE810B]/10 via-[#141517] to-[#141517] p-3.5 sm:p-4 text-xs">
+          <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#FE810B]/20 text-[#FE810B]">
+              <Clock className="size-4.5" />
+            </div>
+            <div className="flex flex-col justify-center min-w-0">
+              <span className="font-bold text-white text-sm leading-tight">
+                代币已开盘上线 · 线性解锁进行中
+              </span>
+              <span className="text-neutral-400 text-[11px] mt-0.5 truncate">
+                {userClaimable > 0n ? (
+                  <span className="text-emerald-400 font-semibold">
+                    ⚡ 您的钱包当前有 {formatEther(userClaimable)} {token?.symbol} 待领取
+                  </span>
+                ) : (
+                  '每个周期自动释放份额，可在下方查看解锁倒计时'
+                )}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center shrink-0 w-full sm:w-auto justify-end">
+            {userClaimable > 0n ? (
+              <button
+                type="button"
+                onClick={handleClaimVesting}
+                disabled={isClaimingVesting}
+                className="flex h-9 w-full sm:w-auto items-center justify-center gap-1.5 rounded-lg bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] px-4 text-xs font-bold text-white shadow-sm transition-transform active:translate-y-0.5 cursor-pointer disabled:opacity-50"
+              >
+                <Gift className="size-3.5" />
+                <span>{isClaimingVesting ? '领取中…' : '立即领取'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setActiveTab('vesting')}
+                className="flex h-9 w-full sm:w-auto items-center justify-center gap-1 rounded-md border border-[#484b51] bg-[#1a1c1e] px-4 text-xs font-medium text-neutral-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+              >
+                <span>查看解锁详情</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 分流展示：已开启预售代币展示 3 个 Tabs，未开启预售代币直接展示 DEX 行情与交易面板 */}
       {hasPresale ? (
         <Tabs
-          value={activeTab}
+          value={
+            presaleStatus === 3 && activeTab === 'presale'
+              ? 'vesting'
+              : activeTab
+          }
           onValueChange={(val) => setActiveTab(val as typeof activeTab)}
           className="w-full"
         >
@@ -766,12 +895,15 @@ export function TokenDetailPage() {
             variant="line"
             className="w-full justify-start border-b border-[#2F3737] bg-transparent p-0 mb-4"
           >
-            <TabsTrigger
-              value="presale"
-              className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
-            >
-              预售
-            </TabsTrigger>
+            {/* 未开盘时才显示预售 Tab；已开盘代币 (presaleStatus === 3) 仅保留解锁和图表 */}
+            {presaleStatus !== 3 && (
+              <TabsTrigger
+                value="presale"
+                className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
+              >
+                预售
+              </TabsTrigger>
+            )}
             <TabsTrigger
               value="vesting"
               className="flex-1 rounded-none py-2.5 text-xs font-bold text-neutral-400 transition-colors duration-300 hover:text-neutral-200 after:h-0.5 after:origin-center after:transition-all after:duration-300 data-active:text-[#FFA546]! data-active:after:bg-[#FFA546]"
@@ -789,8 +921,9 @@ export function TokenDetailPage() {
             )}
           </TabsList>
 
-          {/* ===================== TAB 1: 预售认购面板 ===================== */}
-          <TabsContent value="presale" className="space-y-4">
+          {/* ===================== TAB 1: 预售认购面板 (仅未开盘时显示) ===================== */}
+          {presaleStatus !== 3 && (
+            <TabsContent value="presale" className="space-y-4">
             {/* 上部：预售参数详情列表 (Figma #6501:6205) */}
             <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#141517] p-4 text-xs">
               <div className="flex items-center justify-between py-2">
@@ -936,17 +1069,54 @@ export function TokenDetailPage() {
                 </div>
               ) : presaleStatus === 2 ? (
                 <div className="flex flex-col items-center gap-3 py-3 text-center">
-                  <div className="flex size-12 items-center justify-center rounded-full bg-purple-400/10 text-purple-300">
+                  <div
+                    className={cn(
+                      'flex size-12 items-center justify-center rounded-full',
+                      isLaunchWindowExpired
+                        ? 'bg-rose-400/10 text-rose-300'
+                        : 'bg-purple-400/10 text-purple-300',
+                    )}
+                  >
                     <Clock className="size-6" />
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-base font-bold text-white">
-                      认购已结束 · 待开盘
+                      {isLaunchWindowExpired
+                        ? '开盘窗口已超时'
+                        : '认购已结束 · 待开盘'}
                     </span>
                     <span className="text-xs leading-relaxed text-neutral-400">
-                      认购窗口已关闭，创建者正在准备开盘加池，当前不可继续认购。
+                      {isLaunchWindowExpired
+                        ? '创建者未在约定时间内完成开盘加池。点击可激活退款流程，所有认购者均可全额取回投入资金。'
+                        : '认购窗口已关闭，创建者正在准备开盘加池，当前不可继续认购。'}
                     </span>
                   </div>
+                  {launchWindowRemainingSeconds !== null && (
+                    <span
+                      className={cn(
+                        'font-mono text-xs',
+                        isLaunchWindowExpired
+                          ? 'text-rose-300'
+                          : 'text-purple-300',
+                      )}
+                    >
+                      {isLaunchWindowExpired
+                        ? '开盘截止时间已过'
+                        : `开盘窗口剩余 ${formatCountdown(launchWindowRemainingSeconds)}`}
+                    </span>
+                  )}
+                  {isLaunchWindowExpired && (
+                    <Button
+                      type="button"
+                      disabled={isEnforcingLaunchDeadline}
+                      onClick={handleEnforceLaunchDeadline}
+                      className="h-10 w-full bg-rose-600 text-sm font-bold text-white hover:bg-rose-500 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isEnforcingLaunchDeadline
+                        ? '正在开启退款…'
+                        : '开启全额退款通道'}
+                    </Button>
+                  )}
                 </div>
               ) : presaleStatus === 3 ? (
                 <div className="flex flex-col items-center gap-3 py-3 text-center">
@@ -1243,64 +1413,27 @@ export function TokenDetailPage() {
               )}
             </div>
           </TabsContent>
+          )}
 
           {/* ===================== TAB 2: 解锁领取面板 ===================== */}
           <TabsContent value="vesting" className="space-y-4">
-            <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#141517] p-4 text-xs">
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">我的认购总份额</span>
-                <span className="font-mono font-bold text-white">
-                  {Number(formatEther(userShare)).toLocaleString()}{' '}
-                  {token?.symbol}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">已领取代币</span>
-                <span className="font-mono font-medium text-neutral-300">
-                  {Number(formatEther(userClaimed)).toLocaleString()}{' '}
-                  {token?.symbol}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">当前可领取</span>
-                <span className="font-mono font-bold text-[#FFA546]">
-                  {Number(formatEther(userClaimable)).toLocaleString()}{' '}
-                  {token?.symbol}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-neutral-400">下期解锁时间</span>
-                <span className="font-mono text-white">
-                  {nextVestingTime > 0n
-                    ? new Date(Number(nextVestingTime) * 1000).toLocaleString()
-                    : presaleStatus === 3
-                      ? '全部周期已释放完毕'
-                      : '开盘加池后启动计时'}
-                </span>
-              </div>
-            </div>
-
-            <Web3ActionButton
-              type="button"
-              size="default"
-              onAction={handleClaimVesting}
-              loading={isClaimingVesting}
-              loadingText="领取中…"
-              disabled={userClaimable <= 0n || presaleStatus !== 3}
-              className="h-11 w-full border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] text-sm font-bold text-white shadow-[0_3px_0_0_#963000] transition-transform active:translate-y-0.5 disabled:opacity-50"
-            >
-              <Gift className="size-4" />
-              <span>
-                {presaleStatus !== 3
-                  ? '待开盘上线后方可领取'
-                  : userClaimable > 0n
-                    ? '领取代币份额'
-                    : '暂无可领取份额'}
-              </span>
-            </Web3ActionButton>
+            <VestingCountdown
+              tokenSymbol={token?.symbol}
+              presaleStatus={presaleStatus}
+              userShare={userShare}
+              userClaimed={userClaimed}
+              userClaimable={userClaimable}
+              nextVestingTime={nextVestingTime}
+              vestingStart={vestingStart}
+              vestingDelay={vestingDelay}
+              vestingRate={vestingRate}
+              isClaiming={isClaimingVesting}
+              onClaim={handleClaimVesting}
+              onCycleReached={() => {
+                void refetchVesting()
+                void refetchVestingStart()
+              }}
+            />
           </TabsContent>
 
           {/* ===================== TAB 3: 图表与交易（仅已开盘上线） ===================== */}

@@ -119,6 +119,11 @@
         "name": "salt",
         "type": "bytes32",
         "internalType": "bytes32"
+      },
+      {
+        "name": "creator",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -416,6 +421,11 @@
   {
     "type": "error",
     "name": "InvalidAntiFarmerDuration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidCreator",
     "inputs": []
   },
   {

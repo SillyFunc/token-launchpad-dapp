@@ -43,7 +43,7 @@ export function Represale() {
       gate.tokenExists &&
       gate.isCreator &&
       gate.presaleEnabled &&
-      gate.presaleStatus === 4 &&
+      (gate.presaleStatus === 4 || gate.presaleStatus === 0) &&
       gate.bnbAccumulated === 0n,
   )
 
@@ -52,8 +52,12 @@ export function Represale() {
   else if (gate.presaleStatus === 4 && gate.bnbAccumulated > 0n) {
     blockedReason = '仍有认购者未退款，请等待未退款金额清零后再重开预售'
   } else if (!gate.isCreator) blockedReason = '仅代币创建者可以重开预售'
-  else if (gate.presaleStatus !== undefined && gate.presaleStatus !== 4) {
-    blockedReason = '只有发行失败状态可以重开预售'
+  else if (
+    gate.presaleStatus !== undefined &&
+    gate.presaleStatus !== 4 &&
+    gate.presaleStatus !== 0
+  ) {
+    blockedReason = '当前代币状态不可重开预售（仅发行失败或新轮配置期可操作）'
   }
 
   return (

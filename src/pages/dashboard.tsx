@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useConnection } from 'wagmi'
+import { useConnection, useWatchContractEvent } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Coins, RefreshCw, Wallet } from 'lucide-react'
 
@@ -11,6 +11,8 @@ import { IssueTokenModal } from '@/components/dashboard/issue-token-modal'
 import { OpenPresaleModal } from '@/components/dashboard/open-presale-modal'
 import { TokenCard } from '@/components/dashboard/token-card'
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
+import { CoordinatorFactoryAbi } from '@/contracts/abi'
+import { DEFAULT_CHAIN_ID, getContractAddresses } from '@/config/network'
 
 export const Dashboard = () => {
   const { address } = useConnection()
@@ -32,6 +34,21 @@ export const Dashboard = () => {
   })
 
   const tokenList = Array.isArray(tokens) ? tokens : []
+
+  const coordinatorAddress = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+
+  // 监听 Coordinator 的 TokenPresalePairCreated 事件（代币发行完成，自动实时刷新控制台）
+  useWatchContractEvent({
+    address: coordinatorAddress,
+    abi: CoordinatorFactoryAbi,
+    eventName: 'TokenPresalePairCreated',
+    chainId: DEFAULT_CHAIN_ID,
+    enabled: Boolean(address),
+    onLogs: () => {
+      void queryClient.invalidateQueries()
+      void refetch()
+    },
+  })
 
   const handlePresale = (token: TokenDetail) => {
     if (token.id) {
@@ -214,6 +231,9 @@ export const Dashboard = () => {
                 )
               },
             )
+            // 立即让链上与后端查询失效并全量重拉，确保状态即时切换
+            void queryClient.invalidateQueries()
+            void refetch()
           }}
         />
       )}

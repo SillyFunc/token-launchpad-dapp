@@ -116,6 +116,7 @@ export interface TokenGateResult {
   tokenState?: number
   presaleEnabled: boolean
   presaleOwner?: Hex
+  presaleRound: number
 
   // 预售进度与软顶判定
   bnbAccumulated: bigint
@@ -151,7 +152,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const { address: userAddress, chainId } = useConnection()
   const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
-  // 解析并规范化代币合约地址（仅取 coinContractAddress 或显式传入的 tokenAddress，绝不可取创建者钱包 address）
+  // 解析并规范化代币合约地址（仅取显式传入的有效 tokenAddress 或已发行的 coinContractAddress）
   const rawAddress =
     options?.tokenAddress ||
     options?.token?.coinContractAddress ||
@@ -329,6 +330,12 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
         functionName: 'creatorBuyBnb',
         chainId: DEFAULT_CHAIN_ID,
       },
+      {
+        address: queryPresaleAddress,
+        abi: PresaleAbi,
+        functionName: 'presaleRound',
+        chainId: DEFAULT_CHAIN_ID,
+      },
     ],
     query: {
       enabled: hasPresaleContract,
@@ -350,6 +357,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   const presaleStartTime = rawStartTime > 0n ? rawStartTime : undefined
   const presaleEndTime = rawEndTime > 0n ? rawEndTime : undefined
   const creatorBuyBnb = (presaleBatch?.[11]?.result as bigint | undefined) ?? 0n
+  const rawPresaleRound = (presaleBatch?.[12]?.result as bigint | undefined) ?? 0n
+  const presaleRound = Number(rawPresaleRound)
 
   // ================= 链上事件实时监听（即时刷新 UI，仅在显式开启 watch 时生效） =================
 
@@ -369,10 +378,8 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
   // ================= 状态解析与聚合 =================
 
   const tokenExists = Boolean(tokenExistsData)
-  // 是否已在链上真正发行：必须有有效合约地址，且 tokenExists 为 true
-  const isIssued = Boolean(
-    hasValidTokenAddress && (tokenExistsData !== undefined ? tokenExists : true),
-  )
+  // 是否已在链上真正发行：必须有有效合约地址，且链上 tokenExists 必须确认返回 true
+  const isIssued = Boolean(hasValidTokenAddress && tokenExistsData === true)
 
   const isChainLoading = hasValidTokenAddress
     ? isCoordinatorLoading || (hasPresaleContract && isPresaleLoading)
@@ -479,12 +486,19 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       ? (String(presaleOwnerData).toLowerCase() as Hex)
       : undefined
 
-  // 创建者身份校验
+  // 创建者身份校验（排除 0x0 链上占位地址，防止未部署的代币因返回 zeroAddress 而误判非创建者）
+  const validOnchainCreator =
+    onchainCreatorData &&
+    String(onchainCreatorData).toLowerCase() !== zeroAddress
+      ? (String(onchainCreatorData).toLowerCase() as Hex)
+      : undefined
+
   const expectedCreator =
-    (onchainCreatorData as string | undefined) ||
+    validOnchainCreator ||
     presaleOwner ||
+    options?.creatorAddress ||
     options?.token?.creatorAddress ||
-    options?.creatorAddress
+    options?.token?.address
 
   const isCreator = Boolean(
     hasWallet &&
@@ -559,6 +573,19 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
       }
     }
     if (presaleConfigured) {
+      if (presaleStatus === 0) {
+        return {
+          allowed: false,
+          reason:
+            '该代币当前处于新一轮预售配置期，请前往专属配置界面设置条款。',
+          primaryAction: {
+            label: '前往配置预售条款',
+            to: `/represale?id=${options?.token?.id || ''}&address=${validTokenAddress}`,
+          },
+          isLoading: false,
+        }
+      }
+
       return {
         allowed: false,
         reason:
@@ -673,6 +700,7 @@ export function useTokenGate(options?: UseTokenGateOptions): TokenGateResult {
     tokenState,
     presaleEnabled,
     presaleOwner,
+    presaleRound,
     bnbAccumulated,
     tokensSubscribed,
     presaleShare,

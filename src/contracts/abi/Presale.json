@@ -608,6 +608,19 @@
   },
   {
     "type": "function",
+    "name": "refundTo",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address payable"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "relaunchPresale",
     "inputs": [],
     "outputs": [],
@@ -655,6 +668,76 @@
     "type": "function",
     "name": "setCustodyMode",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setPresaleConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct PRESALE.PresaleRoundConfig",
+        "components": [
+          {
+            "name": "presaleTokenPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPresaleTokens",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxBuyPerWallet",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "hardcap",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minLiquidityAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "softCap",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "startTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "duration",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingDelay",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingRate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "slippageProtection",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -1312,6 +1395,31 @@
   },
   {
     "type": "event",
+    "name": "RefundedTo",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RemainingBNBWithdrawn",
     "inputs": [
       {
@@ -1438,6 +1546,11 @@
   },
   {
     "type": "error",
+    "name": "AllocationMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "AlreadyInitialized",
     "inputs": []
   },
@@ -1464,6 +1577,11 @@
   },
   {
     "type": "error",
+    "name": "ConfiguratorAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "CreatorBuyLocked",
     "inputs": []
   },
@@ -1485,11 +1603,6 @@
   },
   {
     "type": "error",
-    "name": "EmptyAllocation",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "EscrowDrained",
     "inputs": []
   },
@@ -1505,6 +1618,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidConfigurator",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidCreator",
     "inputs": []
   },
@@ -1515,12 +1633,22 @@
   },
   {
     "type": "error",
+    "name": "InvalidMaxBuyPerWallet",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidMaxPresaleTokens",
     "inputs": []
   },
   {
     "type": "error",
     "name": "InvalidPrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRefundRecipient",
     "inputs": []
   },
   {
@@ -1575,12 +1703,27 @@
   },
   {
     "type": "error",
+    "name": "NotConfigurator",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotLaunched",
     "inputs": []
   },
   {
     "type": "error",
+    "name": "NotOwnerOrConfigurator",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NothingToClaim",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PairAlreadyInitialized",
     "inputs": []
   },
   {
@@ -1591,6 +1734,11 @@
   {
     "type": "error",
     "name": "PresaleDisabled",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PresaleEnabled",
     "inputs": []
   },
   {
@@ -1677,6 +1825,11 @@
   {
     "type": "error",
     "name": "WalletLimitExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAllocationShare",
     "inputs": []
   },
   {

@@ -56,7 +56,7 @@ export function OpenPresaleModal({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const config = useConfig()
-  const { presaleAddress, presaleConfigured } = useTokenGate({ token })
+  const { presaleAddress, presaleConfigured, presaleRound } = useTokenGate({ token })
 
   const [isExecuting, setIsExecuting] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
@@ -298,11 +298,31 @@ export function OpenPresaleModal({
           </div>
 
           {!isSuccess && (
-            <div className="flex items-start gap-2 border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
-              <span>
-                预售开启后即刻接受散户认购，达到软顶后即可结束认购并一键加池开盘。
-              </span>
+            <div className="flex flex-col gap-2">
+              {presaleRound > 0 && (
+                <div className="flex items-center justify-between text-xs px-1">
+                  <span className="text-neutral-400">条款需要微调？</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose()
+                      navigate(
+                        `/represale?id=${token.id}&address=${token.coinContractAddress || ''}`,
+                      )
+                    }}
+                    className="text-[#FFA546] hover:underline font-semibold cursor-pointer"
+                  >
+                    修改预售条款 →
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-start gap-2 border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
+                <span>
+                  预售开启后即刻接受散户认购，达到软顶后即可结束认购并一键加池开盘。
+                </span>
+              </div>
             </div>
           )}
 
