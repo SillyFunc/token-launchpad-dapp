@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useConnection } from 'wagmi'
 import { type Hex } from 'viem'
@@ -13,6 +13,7 @@ import { PresaleForm } from '@/components/presale/presale-form'
 import { useTokenGate } from '@/hooks/use-token-gate'
 
 export const Presale = () => {
+  const nav = useNavigate()
   const [searchParams] = useSearchParams()
   const id = searchParams.get('id')
   const rawAddress = searchParams.get('address') || ''
@@ -49,7 +50,7 @@ export const Presale = () => {
         <button
           type="button"
           aria-label="返回"
-          onClick={() => window.history.back()}
+          onClick={() => nav(-1)}
           className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
         >
           <img

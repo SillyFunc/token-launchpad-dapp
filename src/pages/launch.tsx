@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 
 import titleBackArrow from '@/assets/icons/back-arrow.svg'
@@ -8,6 +8,7 @@ import { BlockedState } from '@/components/presale/blocked-state'
 import { LaunchForm } from '@/components/launch/launch-form'
 
 export const Launch = () => {
+  const nav = useNavigate()
   const [searchParams] = useSearchParams()
   const editId = searchParams.get('id') || searchParams.get('edit')
   const isEditMode = Boolean(editId)
@@ -38,7 +39,7 @@ export const Launch = () => {
             <button
               type="button"
               aria-label="返回"
-              onClick={() => window.history.back()}
+              onClick={() => nav('/')}
               className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
             >
               <img
@@ -70,7 +71,7 @@ export const Launch = () => {
             <button
               type="button"
               aria-label="返回"
-              onClick={() => window.history.back()}
+              onClick={() => nav('/')}
               className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
             >
               <img
@@ -103,7 +104,7 @@ export const Launch = () => {
             <button
               type="button"
               aria-label="返回"
-              onClick={() => window.history.back()}
+              onClick={() => nav('/')}
               className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#FE810B]"
             >
               <img

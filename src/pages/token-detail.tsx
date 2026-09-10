@@ -710,7 +710,7 @@ export function TokenDetailPage() {
           <button
             type="button"
             aria-label="返回"
-            onClick={() => window.history.back()}
+            onClick={() => navigate(-1)}
             className="flex size-6 shrink-0 items-center justify-center rounded-xs hover:opacity-80 focus:outline-none"
           >
             <img

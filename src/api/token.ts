@@ -255,6 +255,8 @@ export interface ReservedAddressListItem {
   salt: string
   /** 0: 未使用；1: 已占用；2: 已使用 */
   status: ReservedAddressStatus
+  /** 0: 未使用；1: 已占用；2: 已使用 */
+  coinStatus: 0 | 1 | 3
 }
 
 export function saveTokenSalt(

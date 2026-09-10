@@ -2,18 +2,18 @@ import { useQuery } from '@tanstack/react-query'
 import { isAddress, type Hex } from 'viem'
 import { useConnection } from 'wagmi'
 
-import {
-  getReservedAddressListByUser,
-  type ReservedAddressStatus,
-} from '@/api/token'
+import { getReservedAddressListByUser } from '@/api/token'
+
+/** coinStatus：0 未使用；1 已占用；3 已使用（见 api/token.ts 字段注释） */
+export type ReservedCoinStatus = 0 | 1 | 3
 
 export interface ReservedAddress {
   token: Hex
-  status: ReservedAddressStatus
+  status: ReservedCoinStatus
 }
 
-function isReservedAddressStatus(value: unknown): value is ReservedAddressStatus {
-  return value === 0 || value === 1 || value === 2
+function isReservedCoinStatus(value: unknown): value is ReservedCoinStatus {
+  return value === 0 || value === 1 || value === 3
 }
 
 /**
@@ -24,15 +24,15 @@ async function fetchReservedAddresses(reserver: Hex): Promise<ReservedAddress[]>
   const records = await getReservedAddressListByUser(reserver)
   const seen = new Set<string>()
 
-  return records.flatMap(({ contractAddress, status }) => {
-    if (!isAddress(contractAddress) || !isReservedAddressStatus(status)) return []
+  return records.flatMap(({ contractAddress, coinStatus }) => {
+    if (!isAddress(contractAddress) || !isReservedCoinStatus(coinStatus)) return []
 
     const token = contractAddress as Hex
     const key = token.toLowerCase()
     if (seen.has(key)) return []
 
     seen.add(key)
-    return [{ token, status }]
+    return [{ token, status: coinStatus }]
   })
 }
 

@@ -31,7 +31,7 @@ const gradientButtonClass =
 const RESERVED_ADDRESS_STATUS = {
   0: { label: '未使用', className: 'text-[#7adfa1]' },
   1: { label: '已占用', className: 'text-[#FFA546]' },
-  2: { label: '已使用', className: 'text-[#84888c]' },
+  3: { label: '已使用', className: 'text-[#84888c]' },
 } as const
 
 const RESERVED_ADDRESS_SKELETONS = [0, 1] as const

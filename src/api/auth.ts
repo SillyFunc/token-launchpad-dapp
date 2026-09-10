@@ -27,3 +27,13 @@ export async function requestAuthSignature(
   const signature = await signMessage(config, { message })
   return { address, message, signature }
 }
+
+/**
+ * 用户初始化
+ * @param address 用户地址
+ * @param config 请求配置
+ * @returns
+ */
+export async function initialize(address: string, config?: AxiosRequestConfig) {
+  return post('deposit/bttk/enter', { address }, config)
+}
