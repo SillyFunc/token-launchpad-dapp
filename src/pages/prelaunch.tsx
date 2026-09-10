@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useBalance, useConfig, useConnection } from 'wagmi'
 import { formatEther } from 'viem'
-import { Check, Copy, ExternalLink, Info, Loader2, RefreshCcw } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Info,
+  Loader2,
+  RefreshCcw,
+} from 'lucide-react'
 
 import { PageBackTitle } from '@/components/common/page-back-title'
 import { SectionWrapper } from '@/components/prelaunch/section-wrapper'
@@ -57,7 +64,6 @@ function toLockErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     return err.message || '预留记录保存失败，请稍后重试'
   }
-  // 鉴权签名等钱包底层错误（含用户取消签名）统一走合约错误解析
   if (err instanceof Error)
     return parseContractError(err, '锁定失败，请稍后重试')
   return '锁定失败，请稍后重试'
@@ -67,10 +73,8 @@ export const Prelaunch = () => {
   const nav = useNavigate()
   const config = useConfig()
   const { address, chainId } = useConnection()
-  const {
-    fee: reservationFeeWei,
-    formattedFee: reservationFee,
-  } = useReservationFee()
+  const { fee: reservationFeeWei, formattedFee: reservationFee } =
+    useReservationFee()
   const { data: balanceData } = useBalance({
     address,
     chainId: DEFAULT_CHAIN_ID,
@@ -95,7 +99,6 @@ export const Prelaunch = () => {
     refetch,
   } = useReservedAddresses()
   const [isReserving, setIsReserving] = useState(false)
-  // 记录刚复制过的地址，用于把对应卡片的图标短暂切成对勾
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
 
   const handleCopy = (value: string) => {
@@ -127,8 +130,7 @@ export const Prelaunch = () => {
       return
     }
 
-    const requiredFeeWei =
-      reservationFeeWei ?? FALLBACK_RESERVATION_FEE_WEI
+    const requiredFeeWei = reservationFeeWei ?? FALLBACK_RESERVATION_FEE_WEI
     if (!balanceData) {
       toast.error('正在读取钱包余额，请稍后再试', '余额读取中')
       return
@@ -146,7 +148,6 @@ export const Prelaunch = () => {
       let auth: AuthSignature
       let txHash: string
 
-      // 签名是链上锁定前的鉴权前置步骤，失败时不会发起链上交易。
       try {
         auth = await requestAuthSignature(config, address)
       } catch (err) {
@@ -158,7 +159,6 @@ export const Prelaunch = () => {
         return
       }
 
-      // 链上步骤单独捕获：只有确认交易成功后，才进入接口保存步骤。
       try {
         const result = await reserveTokenAddress(salt)
         txHash = result.hash
@@ -171,32 +171,26 @@ export const Prelaunch = () => {
         return
       }
 
-      // 接口步骤单独捕获：接口失败不会回滚已成功的链上锁定，也不会重复发送交易。
       try {
-        await saveTokenSalt(
-          {
-            contractAddress: predictedAddress,
-            salt,
-            txHash,
-            address: auth.address,
-            message: auth.message,
-            signature: auth.signature,
-          },
-          { silent: true },
-        )
+        await saveTokenSalt({
+          contractAddress: predictedAddress,
+          salt,
+          txHash,
+          address: auth.address,
+          message: auth.message,
+          signature: auth.signature,
+        })
       } catch (err) {
         console.error('[Prelaunch] 保存预留记录失败（链上锁定已成功）', {
           contractAddress: predictedAddress,
           txHash,
           error: err,
         })
-        toast.error(toLockErrorMessage(err), '保存失败')
         return
       }
 
       toast.success('地址已锁定并归属当前钱包，可随时用于发布代币', '锁定成功')
       resetSalt()
-      // 保存成功后立即刷新列表，让刚锁定的地址在当前页面展示出来。
       const refreshed = await refetch()
       if (refreshed.error) {
         console.warn('[Prelaunch] 预留记录已保存，但列表刷新失败', {
