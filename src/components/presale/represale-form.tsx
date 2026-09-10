@@ -162,6 +162,7 @@ export function RepresaleForm({
           (gate.onchainMaxBuy * gate.onchainPresalePrice) / 10n ** 18n,
         )
       : ''
+  const previousStartTimeSec = Number(gate.presaleStartTime ?? 0n)
 
   const form = useForm({
     defaultValues: {
@@ -230,6 +231,12 @@ export function RepresaleForm({
         const startTimeSec = Number(value.startTime || 0)
         if (!startTimeSec || startTimeSec <= Math.floor(Date.now() / 1000)) {
           throw new Error('开始时间必须晚于当前时间，请重新选择开始时间')
+        }
+        if (
+          previousStartTimeSec > 0 &&
+          startTimeSec <= previousStartTimeSec
+        ) {
+          throw new Error('重开预售的开始时间必须晚于上一轮预售开始时间')
         }
 
         const slippageBps =
@@ -557,6 +564,8 @@ export function RepresaleForm({
               if (!value || isNaN(sec) || sec <= 0) return '请选择开始时间'
               if (sec <= Math.floor(Date.now() / 1000))
                 return '开始时间必须晚于当前时间'
+              if (previousStartTimeSec > 0 && sec <= previousStartTimeSec)
+                return '重开预售的开始时间必须晚于上一轮预售开始时间'
               return undefined
             },
           }}
@@ -567,6 +576,11 @@ export function RepresaleForm({
                 value={field.state.value}
                 onChange={field.handleChange}
                 onBlur={field.handleBlur}
+                minTimestamp={
+                  previousStartTimeSec > 0
+                    ? previousStartTimeSec
+                    : undefined
+                }
               />
               <FieldInfo field={field} />
             </FieldWrap>
@@ -709,7 +723,8 @@ export function RepresaleForm({
                     state.values.maxBuyBnb &&
                     state.values.startTime &&
                     Number(state.values.startTime) >
-                      Math.floor(Date.now() / 1000),
+                      Math.floor(Date.now() / 1000) &&
+                    Number(state.values.startTime) > previousStartTimeSec,
                   ),
                 isSubmitting: state.isSubmitting || Boolean(submitStep),
               })}

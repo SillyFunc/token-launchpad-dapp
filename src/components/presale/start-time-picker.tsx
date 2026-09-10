@@ -12,6 +12,8 @@ export interface StartTimePickerProps {
   onChange: (value: string) => void
   onBlur?: () => void
   disabled?: boolean
+  /** 可选的额外下限（秒级时间戳，严格晚于该时间） */
+  minTimestamp?: number
 }
 
 /** 滚轮几何：单项高度 × 可见行数 = 视口高度，上下留白让首尾项也能滚到中心 */
@@ -32,9 +34,9 @@ function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate()
 }
 
-/** 未选定时的默认开始时间：1 小时后，秒位归零 */
+/** 未选定时的默认开始时间：当前分钟，秒位归零 */
 function defaultTarget(): Date {
-  const d = new Date(Date.now() + 3600 * 1000)
+  const d = new Date()
   d.setSeconds(0, 0)
   return d
 }
@@ -55,7 +57,8 @@ interface WheelColumnProps {
 /**
  * 单列滚轮。
  * 复用原生 overflow-y 滚动 + scroll-snap，白拿移动端惯性与边界回弹手感；
- * 停稳后按 scrollTop 反推选中项，落到禁用项时自动吸附到最近的可选项。
+ * 停稳后按 scrollTop 反推选中项；落到灰色（无效）项时只向后吸附到最近的有效项，
+ * 避免用户继续向上滚到已经过去的时间。
  */
 function WheelColumn({ items, value, onChange, ariaLabel }: WheelColumnProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -66,7 +69,7 @@ function WheelColumn({ items, value, onChange, ariaLabel }: WheelColumnProps) {
     return found === -1 ? 0 : found
   }, [items, value])
 
-  // 父级改值（切月导致日数变化、过去时间被顺延）时把滚轮拉回对应位置
+  // 父级改值（切月导致日数变化、约束变化）时把滚轮拉回对应位置
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -94,29 +97,15 @@ function WheelColumn({ items, value, onChange, ariaLabel }: WheelColumnProps) {
 
       let target = landed
       if (items[target]?.disabled) {
-        // 向外找最近的可选项；优先向后（更晚），因为更早的那些通常已是过去
-        let found = -1
-        for (let step = 1; step <= items.length; step += 1) {
-          const later = landed + step
-          const earlier = landed - step
-          if (later < items.length && !items[later].disabled) {
-            found = later
-            break
-          }
-          if (earlier >= 0 && !items[earlier].disabled) {
-            found = earlier
+        // 过去/低于额外下限的项只能向后吸附，禁止向前回到更早的时间。
+        let nextValid = -1
+        for (let index = landed + 1; index < items.length; index += 1) {
+          if (!items[index]?.disabled) {
+            nextValid = index
             break
           }
         }
-        if (found === -1) {
-          // 整列都不可选：退回当前值，交给外层的顺延逻辑兜底
-          const back = currentIndex * ITEM_HEIGHT
-          if (Math.abs(el.scrollTop - back) > 1) {
-            el.scrollTo({ top: back, behavior: 'smooth' })
-          }
-          return
-        }
-        target = found
+        target = nextValid >= 0 ? nextValid : currentIndex
       }
 
       const targetTop = target * ITEM_HEIGHT
@@ -146,6 +135,7 @@ function WheelColumn({ items, value, onChange, ariaLabel }: WheelColumnProps) {
             key={item.value}
             role="option"
             aria-selected={item.value === value}
+            aria-disabled={item.disabled}
             style={{ height: ITEM_HEIGHT, scrollSnapAlign: 'center' }}
             className={cn(
               'flex items-center justify-center text-sm tabular-nums transition-colors duration-150 select-none',
@@ -179,6 +169,7 @@ export function StartTimePicker({
   onChange,
   onBlur,
   disabled = false,
+  minTimestamp,
 }: StartTimePickerProps) {
   const numericTimestamp = Number(value) || 0
   const [mounted, setMounted] = useState(false)
@@ -224,12 +215,53 @@ export function StartTimePicker({
   useKeyPress('esc', closeSheet, { events: ['keydown'] })
 
   const curYear = referenceNow.getFullYear()
-  const curMonth = referenceNow.getMonth() + 1
-  const curDay = referenceNow.getDate()
-  const curHour = referenceNow.getHours()
-  const curMinute = referenceNow.getMinutes()
 
-  const isTodayPicked = year === curYear && month === curMonth && day === curDay
+  const minTimestampMs =
+    Number.isFinite(minTimestamp) && (minTimestamp ?? 0) > 0
+      ? (minTimestamp as number) * 1000
+      : 0
+  // 开始时间必须同时晚于当前时间和（重开预售时）上一轮开始时间。
+  const minimumTimeMs = Math.max(referenceNow.getTime(), minTimestampMs)
+  const minimumDate = new Date(minimumTimeMs)
+  const minimumYear = minimumDate.getFullYear()
+  const minimumMonth = minimumDate.getMonth() + 1
+  const minimumDay = minimumDate.getDate()
+  const minimumHour = minimumDate.getHours()
+
+  const isDateBeforeMinimum = (
+    candidateYear: number,
+    candidateMonth: number,
+    candidateDay: number,
+  ) =>
+    candidateYear < minimumYear ||
+    (candidateYear === minimumYear && candidateMonth < minimumMonth) ||
+    (candidateYear === minimumYear &&
+      candidateMonth === minimumMonth &&
+      candidateDay < minimumDay)
+
+  const isCandidateInvalid = (
+    candidateYear: number,
+    candidateMonth: number,
+    candidateDay: number,
+    candidateHour: number,
+    candidateMinute: number,
+  ) => {
+    const clampedDay = Math.min(
+      candidateDay,
+      daysInMonth(candidateYear, candidateMonth),
+    )
+    const candidate = new Date(
+      candidateYear,
+      candidateMonth - 1,
+      clampedDay,
+      candidateHour,
+      candidateMinute,
+      0,
+      0,
+    )
+    return candidate.getTime() <= minimumTimeMs
+  }
+
   const monthDays = daysInMonth(year, month)
 
   // 切月/切年后把「日」夹紧到当月有效范围
@@ -237,27 +269,17 @@ export function StartTimePicker({
     if (day > monthDays) setDay(monthDays)
   }, [day, monthDays])
 
-  // 组合出的时刻若已过去（含整列不可选的边界，如 23:59），统一顺延到下一分钟
-  useEffect(() => {
-    if (!open) return
-    const composed = new Date(year, month - 1, day, hour, minute, 0, 0)
-    if (composed.getTime() > referenceNow.getTime()) return
-    const bumped = new Date(referenceNow.getTime() + 60_000)
-    bumped.setSeconds(0, 0)
-    setYear(bumped.getFullYear())
-    setMonth(bumped.getMonth() + 1)
-    setDay(bumped.getDate())
-    setHour(bumped.getHours())
-    setMinute(bumped.getMinutes())
-  }, [open, year, month, day, hour, minute, referenceNow])
-
   const yearItems = useMemo<WheelItem[]>(
     () =>
       Array.from({ length: YEAR_SPAN + 1 }, (_, i) => {
         const y = curYear + i
-        return { value: y, label: `${y}年` }
+        return {
+          value: y,
+          label: `${y}年`,
+          disabled: y < minimumYear,
+        }
       }),
-    [curYear],
+    [curYear, minimumYear],
   )
 
   const monthItems = useMemo<WheelItem[]>(
@@ -267,10 +289,12 @@ export function StartTimePicker({
         return {
           value: m,
           label: `${pad2(m)}月`,
-          disabled: year === curYear && m < curMonth,
+          disabled:
+            year < minimumYear ||
+            (year === minimumYear && m < minimumMonth),
         }
       }),
-    [year, curYear, curMonth],
+    [year, minimumYear, minimumMonth],
   )
 
   const dayItems = useMemo<WheelItem[]>(
@@ -280,10 +304,10 @@ export function StartTimePicker({
         return {
           value: d,
           label: `${pad2(d)}日`,
-          disabled: year === curYear && month === curMonth && d < curDay,
+          disabled: isDateBeforeMinimum(year, month, d),
         }
       }),
-    [monthDays, year, curYear, month, curMonth, curDay],
+    [monthDays, year, month, minimumYear, minimumMonth, minimumDay],
   )
 
   const hourItems = useMemo<WheelItem[]>(
@@ -291,9 +315,14 @@ export function StartTimePicker({
       Array.from({ length: 24 }, (_, h) => ({
         value: h,
         label: `${pad2(h)}时`,
-        disabled: isTodayPicked && h < curHour,
+        disabled:
+          isDateBeforeMinimum(year, month, day) ||
+          (year === minimumYear &&
+            month === minimumMonth &&
+            day === minimumDay &&
+            h < minimumHour),
       })),
-    [isTodayPicked, curHour],
+    [year, month, day, minimumYear, minimumMonth, minimumDay, minimumHour],
   )
 
   const minuteItems = useMemo<WheelItem[]>(
@@ -301,15 +330,20 @@ export function StartTimePicker({
       Array.from({ length: 60 }, (_, m) => ({
         value: m,
         label: `${pad2(m)}分`,
-        // 同一小时内必须严格晚于当前分钟，否则组合出的时刻仍可能已过去
-        disabled: isTodayPicked && hour === curHour && m <= curMinute,
+        disabled: isCandidateInvalid(year, month, day, hour, m),
       })),
-    [isTodayPicked, hour, curHour, curMinute],
+    [year, month, day, hour, minimumTimeMs],
   )
 
   const composedDate = new Date(year, month - 1, day, hour, minute, 0, 0)
-  const previewText = format(composedDate, 'yyyy年MM月dd日 HH:mm')
-  const isInvalid = composedDate.getTime() <= referenceNow.getTime()
+  const composedTimestamp = composedDate.getTime()
+  const isBeforePreviousStart =
+    minTimestampMs > 0 && composedTimestamp <= minTimestampMs
+  const isBeforeCurrent = composedTimestamp <= referenceNow.getTime()
+  const isInvalid = isBeforePreviousStart || isBeforeCurrent
+  const invalidMessage = isBeforePreviousStart
+    ? '重开预售的开始时间必须晚于上一轮预售开始时间'
+    : '开始时间必须晚于当前时间'
 
   const openPanel = useMemoizedFn(() => {
     if (disabled) return
@@ -325,8 +359,11 @@ export function StartTimePicker({
   })
 
   const handleConfirm = useMemoizedFn(() => {
-    // referenceNow 仍可能落后于真实时钟（tick 间隔内），确认前用真实时间做最终校验
-    if (composedDate.getTime() <= Date.now()) {
+    // referenceNow 仍可能落后于真实时钟（tick 间隔内），确认前用真实时间和额外下限做最终校验
+    if (
+      composedTimestamp <= Date.now() ||
+      composedTimestamp <= minTimestampMs
+    ) {
       setReferenceNow(new Date())
       return
     }
@@ -446,11 +483,11 @@ export function StartTimePicker({
 
             {isInvalid ? (
               <p className="px-4 pt-2 text-center text-2.75 text-[#f7594b]">
-                开始时间必须晚于当前时间
+                {invalidMessage}
               </p>
             ) : (
               <p className="px-4 pt-2 text-center text-2.75 text-neutral-500">
-                上下滑动选择，过去的时刻不可选
+                上下滑动选择，过去的时刻会提示且无法确认
               </p>
             )}
 

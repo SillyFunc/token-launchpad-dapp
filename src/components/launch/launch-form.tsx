@@ -149,8 +149,8 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
         // 选择了预留地址则使用其锁定时的盐（链上 NotReserver 校验要求原盐）；
         // 编辑模式下代币尚未上链，同样允许更换：未选预留时若草稿原盐属于自动生成则沿用，
         // 若原盐是某个预留地址的盐（用户刚取消选择）则必须重新生成，否则会误占预留地址。
-        if (value.reservedAddress?.used) {
-          toast.error('所选预留地址已用于创建代币，请重新选择')
+        if (value.reservedAddress && value.reservedAddress.coinStatus !== 0) {
+          toast.error('所选预留地址不可用，请重新选择')
           return
         }
         let createSalt: string | undefined
@@ -195,6 +195,9 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             telegram: value.links.telegram?.trim() ?? '',
             twitter: value.links.twitter?.trim() ?? '',
             salt: createSalt,
+            ...(value.reservedAddress
+              ? { coinContractAddress: value.reservedAddress.address }
+              : {}),
             ...auth,
           })
           toast.success('代币信息修改已保存！')
@@ -215,6 +218,9 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
             telegram: value.links.telegram?.trim() ?? '',
             twitter: value.links.twitter?.trim() ?? '',
             salt: createSalt,
+            ...(value.reservedAddress
+              ? { coinContractAddress: value.reservedAddress.address }
+              : {}),
             ...auth,
           })
           toast.success('创建成功！')

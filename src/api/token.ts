@@ -13,6 +13,8 @@ export interface SaveTokenData {
   antiFarmerDuration: number
   liqExpectedOutputAmount: number
   salt?: string
+  /** 选择预留 CA 时传入对应的代币合约地址 */
+  coinContractAddress?: string
   creationFee?: number
   launchType: number
   website: string
@@ -253,10 +255,10 @@ export interface ReservedAddressListItem {
   id: number
   contractAddress: string
   salt: string
-  /** 0: 未使用；1: 已占用；2: 已使用 */
+  /** 预留记录状态；地址是否可发行请使用 coinStatus 判断 */
   status: ReservedAddressStatus
   /** 0: 未使用；1: 已占用；2: 已使用 */
-  coinStatus: 0 | 1 | 3
+  coinStatus: ReservedAddressStatus
 }
 
 export function saveTokenSalt(

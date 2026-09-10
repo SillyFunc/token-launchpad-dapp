@@ -1,5 +1,47 @@
 import type { ApiResponse } from '@/api/types'
 import axios, { type AxiosRequestConfig } from 'axios'
+import { toast } from '@/components/ui/toast'
+
+const DEFAULT_REQUEST_ERROR_MESSAGE = '请求失败，请稍后重试'
+const REQUEST_TOAST_DEDUP_WINDOW_MS = 1500
+
+let lastRequestToastKey = ''
+let lastRequestToastAt = 0
+
+/** 避免同一个失败请求在重试或多个观察者下短时间重复弹窗。 */
+function notifyRequestError(message: string) {
+  const text = message.trim() || DEFAULT_REQUEST_ERROR_MESSAGE
+  const now = Date.now()
+  if (
+    text === lastRequestToastKey &&
+    now - lastRequestToastAt < REQUEST_TOAST_DEDUP_WINDOW_MS
+  ) {
+    return
+  }
+  lastRequestToastKey = text
+  lastRequestToastAt = now
+  toast.error(text, '请求失败')
+}
+
+function getTransportErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const responseMessage = (error.response?.data as Partial<ApiResponse> | undefined)
+      ?.message
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return '请求超时，请稍后重试'
+    }
+    if (!error.response) {
+      return '网络连接失败，请检查网络后重试'
+    }
+    return `请求失败（HTTP ${error.response.status}）`
+  }
+  return error instanceof Error && error.message
+    ? error.message
+    : DEFAULT_REQUEST_ERROR_MESSAGE
+}
 
 /**
  * 业务逻辑异常类
@@ -76,6 +118,15 @@ instance.defaults.transformRequest = [
 instance.interceptors.response.use(
   (response) => response,
   (error) => {
+    const silent = Boolean(error?.config?.silent)
+    const message = getTransportErrorMessage(error)
+    console.error('[API] 请求失败', {
+      url: error?.config?.url,
+      method: error?.config?.method,
+      status: error?.response?.status,
+      error,
+    })
+    if (!silent) notifyRequestError(message)
     return Promise.reject(error)
   },
 )
@@ -84,10 +135,10 @@ function unwrap<T>(res: ApiResponse<T>, silent = false): T {
   if (res.code === 0) {
     return (res.data !== undefined ? res.data : res) as T
   }
-  if (!silent) {
-    console.log(res.message)
-  }
-  throw new ApiError(res.code, res.message || '业务请求失败')
+  const message = res.message || DEFAULT_REQUEST_ERROR_MESSAGE
+  console.error('[API] 业务请求失败', { code: res.code, message })
+  if (!silent) notifyRequestError(message)
+  throw new ApiError(res.code, message)
 }
 
 export async function get<T>(

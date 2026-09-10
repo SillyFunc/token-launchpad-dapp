@@ -50,7 +50,11 @@ import {
   formatNumber,
   formatDecimalText,
 } from '@/lib/format'
-import { CoordinatorFactoryAbi, PresaleAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
+import {
+  CoordinatorFactoryAbi,
+  PresaleAbi,
+  FlapTaxTokenV3Abi,
+} from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
 import { sendContractTx } from '@/lib/contract-tx'
 import { useLocale } from '@/lib/i18n'
@@ -59,8 +63,13 @@ import {
   resolveTokenStage,
   type TokenCardStage,
 } from '@/hooks/use-token-gate'
-import { DEFAULT_CHAIN_ID, getContractAddresses, getExplorerUrl } from '@/config/network'
+import {
+  DEFAULT_CHAIN_ID,
+  getContractAddresses,
+  getExplorerUrl,
+} from '@/config/network'
 import { predictTokenAddress } from '@/lib/vanity-salt'
+import { watchErc20Asset } from '@/lib/wallet-watch-asset'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
@@ -152,8 +161,11 @@ export function TokenCard({
   const [isRelaunching, setIsRelaunching] = useState(false)
 
   const { address: userAddress } = useConnection()
-  const coordinatorAddress = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
-  const creatorWallet = (token.creatorAddress || token.address || userAddress) as Hex | undefined
+  const coordinatorAddress =
+    getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+  const creatorWallet = (token.creatorAddress ||
+    token.address ||
+    userAddress) as Hex | undefined
 
   // 1. 从合约 CoordinatorFactory.getTokenPresalePairsByCreator 获取该创建者在链上的真实代币
   const { data: creatorPairsData } = useReadContract({
@@ -191,7 +203,8 @@ export function TokenCard({
         (pair) =>
           pair.tokenSymbol.trim().toLowerCase() ===
             token.symbol.trim().toLowerCase() &&
-          pair.tokenName.trim().toLowerCase() === token.name.trim().toLowerCase(),
+          pair.tokenName.trim().toLowerCase() ===
+            token.name.trim().toLowerCase(),
       )
       if (match) return match.tokenAddress as Hex
     }
@@ -239,9 +252,7 @@ export function TokenCard({
       ? Number(token.maxBuyPerWallet) * Number(token.presaleTokenPrice)
       : 0
   const presaleShareNum =
-    presaleShare > 0n
-      ? Number(formatEther(presaleShare))
-      : 500_000
+    presaleShare > 0n ? Number(formatEther(presaleShare)) : 500_000
 
   const tokenSalesPercent =
     presaleShareNum > 0
@@ -253,9 +264,7 @@ export function TokenCard({
       ? Number(formatEther(softCap))
       : Number(token.softcap || token.soft || 0)
   const hardCapNum =
-    hardCap > 0n
-      ? Number(formatEther(hardCap))
-      : Number(token.hardcap || 0)
+    hardCap > 0n ? Number(formatEther(hardCap)) : Number(token.hardcap || 0)
 
   const isSoftCapReached =
     rawSoftCapReached ||
@@ -326,7 +335,10 @@ export function TokenCard({
       toast.success('请关注您钱包里的代币余额', '领取成功')
       onClaim(token)
     } catch (err: unknown) {
-      toast.error(parseContractError(err, '代币领取失败，请稍后重试'), '领取失败')
+      toast.error(
+        parseContractError(err, '代币领取失败，请稍后重试'),
+        '领取失败',
+      )
     } finally {
       setIsClaiming(false)
     }
@@ -346,7 +358,8 @@ export function TokenCard({
   const handleOpenPresale = async (account: Hex) => {
     setIsOpeningPresale(true)
     try {
-      const coordinator = getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
+      const coordinator =
+        getContractAddresses(DEFAULT_CHAIN_ID).coordinatorFactory
 
       // 优先使用 gate 解析结果，列表读取时序未完成时直读 Coordinator 兜底
       let escrow = presaleAddress
@@ -364,7 +377,10 @@ export function TokenCard({
       }
 
       if (!escrow) {
-        toast.error('未在链上找到该代币的托管仓，请确认代币已在链上发行', '开启失败')
+        toast.error(
+          '未在链上找到该代币的托管仓，请确认代币已在链上发行',
+          '开启失败',
+        )
         return
       }
 
@@ -431,7 +447,10 @@ export function TokenCard({
           : '预售已结束！未达软顶，已转入退款流程（可重开预售）',
       )
     } catch (err: unknown) {
-      toast.error(parseContractError(err, '结束预售失败，请稍后重试'), '结束失败')
+      toast.error(
+        parseContractError(err, '结束预售失败，请稍后重试'),
+        '结束失败',
+      )
     } finally {
       setIsEnding(false)
       setIsEndConfirmOpen(false)
@@ -466,6 +485,17 @@ export function TokenCard({
       toast.success('代币发行成功！')
       onIssued(token, result.tokenAddress)
 
+      // 发行确认后请求当前注入钱包添加该 ERC-20；钱包不支持、用户跳过或 Logo 无效
+      // 都不能影响已经成功上链的发行流程。
+      void watchErc20Asset({
+        address: result.tokenAddress,
+        symbol: token.symbol,
+        decimals: 18,
+        image: token.coinImg,
+      }).catch((error) =>
+        console.debug('Wallet did not add the issued token asset', error),
+      )
+
       if (token.id) {
         void parseTxHash({ id: token.id, hash: result.txHash, ...auth }).catch(
           (error) => console.error('Failed to sync tx hash to backend', error),
@@ -497,7 +527,10 @@ export function TokenCard({
       queryClient.invalidateQueries()
       toast.success('代币已成功开盘加池！LP 已永久死锁')
     } catch (err: unknown) {
-      toast.error(parseContractError(err, '一键开盘失败，请稍后重试'), '开盘失败')
+      toast.error(
+        parseContractError(err, '一键开盘失败，请稍后重试'),
+        '开盘失败',
+      )
     } finally {
       setIsLaunching(false)
     }
@@ -764,7 +797,10 @@ export function TokenCard({
                     <strong className="text-white">
                       {formatDecimalText(bnbAccumulatedNum)}
                     </strong>{' '}
-                    / {softCapNum > 0 ? `${formatDecimalText(softCapNum)} BNB` : '--'}
+                    /{' '}
+                    {softCapNum > 0
+                      ? `${formatDecimalText(softCapNum)} BNB`
+                      : '--'}
                     <span
                       className={cn(
                         'ml-1.5 font-semibold',

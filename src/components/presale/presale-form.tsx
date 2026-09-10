@@ -226,6 +226,10 @@ export function PresaleForm({
       // 开始时间：0 = 立即（链上语义）；后端与链上保持同口径传 0，
       // 真实结束时间由后端解析 openPresale 交易后按链上 endTime 为准
       const pickedStartSec = Number(value.startTime) || 0
+      if (!pickedStartSec || pickedStartSec <= Math.floor(Date.now() / 1000)) {
+        toast.error('开始时间必须晚于当前时间，请重新选择开始时间')
+        return
+      }
 
       const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
       let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
@@ -425,35 +429,6 @@ export function PresaleForm({
             </FieldWrap>
           )}
         </form.Field>
-        <form.Subscribe selector={(state) => state.values.hardcap}>
-          {(hardcap) => {
-            let priceText = ''
-            try {
-              const priceWei = calculatePresaleTokenPrice(
-                parseEther(hardcap || '0'),
-                presaleShare,
-              )
-              priceText = priceWei ? formatEther(priceWei) : ''
-            } catch {
-              priceText = ''
-            }
-
-            return (
-              <FieldWrap label="预售价格（自动计算）" required>
-                <UnitInput
-                  readOnly
-                  value={priceText}
-                  placeholder="填写硬顶后自动计算"
-                  unit="BNB/枚"
-                />
-                <p className="mt-1 text-xs text-neutral-500">
-                  单价 = 向上取整（硬顶 ÷ 预售总量），售罄募集金额不低于硬顶
-                </p>
-              </FieldWrap>
-            )
-          }}
-        </form.Subscribe>
-
         <form.Field
           name="maxBuyBnb"
           validators={{
@@ -593,7 +568,7 @@ export function PresaleForm({
                     <span className="font-mono text-sm font-bold text-[#FFA546]">
                       {presaleTokenPrice || '--'}
                     </span>
-                    <span className="text-xs text-neutral-400">BNB</span>
+                    <span className="text-xs text-neutral-400">BNB/枚</span>
                   </div>
                 </div>
               </div>
@@ -608,8 +583,14 @@ export function PresaleForm({
         <form.Field
           name="startTime"
           validators={{
-            onChange: ({ value }) =>
-              value && Number(value) > 0 ? undefined : '请选择开始时间',
+            onChange: ({ value }) => {
+              const sec = Number(value)
+              if (!value || !Number.isFinite(sec) || sec <= 0)
+                return '请选择开始时间'
+              if (sec <= Math.floor(Date.now() / 1000))
+                return '开始时间必须晚于当前时间'
+              return undefined
+            },
           }}
         >
           {(field) => (
@@ -832,7 +813,9 @@ export function PresaleForm({
                 state.values.hardcap &&
                   state.values.softcap &&
                   state.values.maxBuyBnb &&
-                  state.values.startTime,
+                  state.values.startTime &&
+                  Number(state.values.startTime) >
+                    Math.floor(Date.now() / 1000),
               ),
             isSubmitting: state.isSubmitting,
           })}
