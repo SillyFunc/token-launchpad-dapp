@@ -149,7 +149,21 @@ export function LaunchForm({ initialData, editId }: LaunchFormProps) {
         // 选择了预留地址则使用其锁定时的盐（链上 NotReserver 校验要求原盐）；
         // 编辑模式下代币尚未上链，同样允许更换：未选预留时若草稿原盐属于自动生成则沿用，
         // 若原盐是某个预留地址的盐（用户刚取消选择）则必须重新生成，否则会误占预留地址。
-        if (value.reservedAddress && value.reservedAddress.coinStatus !== 0) {
+        const isCurrentReservedAddress =
+          isEditMode &&
+          value.reservedAddress &&
+          ((initialData?.salt &&
+            value.reservedAddress.salt.toLowerCase() ===
+              String(initialData.salt).toLowerCase()) ||
+            (initialData?.coinContractAddress &&
+              value.reservedAddress.address.toLowerCase() ===
+                String(initialData.coinContractAddress).toLowerCase()))
+
+        if (
+          value.reservedAddress &&
+          value.reservedAddress.coinStatus !== 0 &&
+          !isCurrentReservedAddress
+        ) {
           toast.error('所选预留地址不可用，请重新选择')
           return
         }
