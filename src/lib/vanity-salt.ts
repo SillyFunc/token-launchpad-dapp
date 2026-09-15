@@ -8,6 +8,7 @@ import {
 import { useEffect, useState, useCallback, useRef } from 'react'
 
 import { DEFAULT_CHAIN_ID, getContractAddresses } from '@/config/network'
+import { getInitCodeHash, predictCloneAddress } from '@/lib/eip1167'
 import type {
   VanityWorkerInput,
   VanityWorkerOutput,
@@ -15,31 +16,6 @@ import type {
 } from '@/workers/vanity-salt.worker'
 
 export const VANITY_SUFFIX = 0x8888
-
-// EIP-1167 极简克隆代码常量（对应合约 Clones.predictDeterministicAddress）
-const EIP1167_PREFIX = hexToBytes('0x3d602d80600a3d3981f3363d3d373d3d3d363d73')
-const EIP1167_SUFFIX = hexToBytes('0x5af43d82803e903d91602b57fd5bf3')
-
-/**
- * 缓存不同实现合约地址对应的 initCodeHash
- */
-const initCodeHashCache = new Map<string, Uint8Array>()
-
-export function getInitCodeHash(flapImplementation: Hex): Uint8Array {
-  const key = flapImplementation.toLowerCase()
-  const cached = initCodeHashCache.get(key)
-  if (cached) return cached
-
-  const implBytes = hexToBytes(flapImplementation)
-  const initCode = new Uint8Array(55)
-  initCode.set(EIP1167_PREFIX, 0)
-  initCode.set(implBytes, 20)
-  initCode.set(EIP1167_SUFFIX, 40)
-
-  const hash = hexToBytes(keccak256(initCode))
-  initCodeHashCache.set(key, hash)
-  return hash
-}
 
 export interface PredictTokenAddressOptions {
   tokenFactory?: Hex
@@ -57,20 +33,12 @@ export function predictTokenAddress(
   const chainId = options.chainId ?? DEFAULT_CHAIN_ID
   const contracts = getContractAddresses(chainId)
 
-  const tokenFactory = options.tokenFactory ?? contracts.tokenFactory
-  const flapImplementation =
-    options.flapImplementation ?? contracts.flapTaxTokenV3
-
-  const initCodeHash = getInitCodeHash(flapImplementation)
-
-  const buf = new Uint8Array(85)
-  buf[0] = 0xff
-  buf.set(hexToBytes(tokenFactory), 1)
-  buf.set(hexToBytes(salt), 21)
-  buf.set(initCodeHash, 53)
-
-  const hash = hexToBytes(keccak256(buf))
-  return getAddress(bytesToHex(hash.slice(12)))
+  return predictCloneAddress({
+    tokenFactory: options.tokenFactory ?? contracts.tokenFactory,
+    flapImplementation:
+      options.flapImplementation ?? contracts.flapTaxTokenV3,
+    salt,
+  })
 }
 
 /**

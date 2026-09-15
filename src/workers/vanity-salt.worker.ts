@@ -1,5 +1,7 @@
 import { keccak256, hexToBytes, bytesToHex, getAddress, type Hex } from 'viem'
 
+import { getInitCodeHash } from '@/lib/eip1167'
+
 export interface VanityWorkerInput {
   tokenFactory: Hex
   flapImplementation: Hex
@@ -24,18 +26,8 @@ self.onmessage = (event: MessageEvent<VanityWorkerInput>) => {
   try {
     const start = performance.now()
 
-    // 1. EIP-1167 Minimal Proxy Bytecode
-    // 3d602d80600a3d3981f3363d3d373d3d3d363d73 + flapImplementation (20B) + 5af43d82803e903d91602b57fd5bf3
-    const prefix = hexToBytes('0x3d602d80600a3d3981f3363d3d373d3d3d363d73')
-    const implBytes = hexToBytes(flapImplementation)
-    const suffix = hexToBytes('0x5af43d82803e903d91602b57fd5bf3')
-
-    const initCode = new Uint8Array(55)
-    initCode.set(prefix, 0)
-    initCode.set(implBytes, 20)
-    initCode.set(suffix, 40)
-
-    const initCodeHash = hexToBytes(keccak256(initCode))
+    // 1. EIP-1167 克隆 init code 哈希（常量收敛于 @/lib/eip1167）
+    const initCodeHash = getInitCodeHash(flapImplementation)
 
     // 2. CREATE2 85 字节紧凑单缓冲区：
     // [0]: 0xff (1B)
