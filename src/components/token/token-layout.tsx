@@ -19,7 +19,7 @@ export const TokenLayout = ({ children }: { children: React.ReactNode }) => {
   })
 
   return (
-    <div className="min-h-dvh overflow-x-hidden overflow-y-auto overflow-hidden">
+    <div className="relative size-full bg-black flex min-h-dvh flex-col text-white">
       <Header
         isMenuOpen={isMenuOpen}
         onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
