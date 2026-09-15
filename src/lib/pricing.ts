@@ -164,10 +164,18 @@ export async function getPricing(
     return { stage: 'not_launched', priceBNB: null, tokenReserve: null, bnbReserve: null, pair: null, baselinePriceBNB: null }
   }
 
-  const [t0, [r0, r1]] = await Promise.all([
+  // 预售价只作为涨幅基准，与交易对储备读取相互独立，合并请求可缩短首屏定价时间。
+  const [t0, [r0, r1], presalePrice] = await Promise.all([
     getPairToken0(client, pair),
     client.readContract({ address: pair, abi: pairAbi, functionName: 'getReserves' }),
-  ]) as [Address, readonly [bigint, bigint, number]]
+    client
+      .readContract({
+        address: presale,
+        abi: presaleAbi,
+        functionName: 'presaleTokenPrice',
+      })
+      .catch(() => null),
+  ]) as [Address, readonly [bigint, bigint, number], bigint | null]
 
   const isT0 = t0.toLowerCase() === tokenAddr.toLowerCase()
   const tokenReserve = isT0 ? r0 : r1
@@ -176,20 +184,10 @@ export async function getPricing(
   if (tokenReserve > 0n) {
     const priceBNB = Number(formatUnits(bnbReserve, 18)) / Number(formatUnits(tokenReserve, 18))
 
-    // 读取预售发行价作为涨幅基准
-    let baselinePriceBNB: number | null = null
-    try {
-      const pp = await client.readContract({
-        address: presale,
-        abi: presaleAbi,
-        functionName: 'presaleTokenPrice',
-      }) as bigint
-      if (pp > 0n) {
-        baselinePriceBNB = Number(formatUnits(pp, 18))
-      }
-    } catch {
-      // 纯发币模式无 presaleTokenPrice
-    }
+    const baselinePriceBNB =
+      presalePrice && presalePrice > 0n
+        ? Number(formatUnits(presalePrice, 18))
+        : null
 
     return { stage: 'live', priceBNB, tokenReserve, bnbReserve, pair, baselinePriceBNB }
   }

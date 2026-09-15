@@ -7,7 +7,9 @@ import { Me } from '../pages/me'
 import { Dashboard } from '@/pages/dashboard'
 import { Presale } from '@/pages/presale'
 import { Represale } from '@/pages/represale'
+import { Subscription } from '@/pages/subscription'
 import { TokenDetailPage } from '@/pages/token-detail'
+import { Token } from '@/pages/token'
 
 export const router = createHashRouter([
   {
@@ -47,9 +49,17 @@ export const router = createHashRouter([
         Component: Represale,
       },
       {
-        path: 'token/:address',
-        Component: TokenDetailPage,
+        path: 'subscription',
+        Component: Subscription,
       },
+      // {
+      //   path: 'token/:address',
+      //   Component: TokenDetailPage,
+      // },
     ],
+  },
+  {
+    path: '/token/:address',
+    Component: Token,
   },
 ])

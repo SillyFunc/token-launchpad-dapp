@@ -15,7 +15,6 @@ import { toast } from '@/components/ui/toast'
 import { updateTokenInfo, type TokenDetail } from '@/api/token'
 import { requestAuthSignature } from '@/api/auth'
 import { CreatorBuySection } from '@/components/presale/creator-buy-section'
-import { StartTimePicker } from '@/components/presale/start-time-picker'
 import { DEFAULT_CHAIN_ID, getContractAddresses } from '@/config/network'
 import { CoordinatorFactoryAbi, FlapTaxTokenV3Abi } from '@/contracts/abi'
 import { parseContractError } from '@/lib/contract-error'
@@ -151,26 +150,33 @@ export function PresaleForm({
     return String(Math.min(30, Math.max(5, minutes)))
   })()
 
+  // 初始表单值：与 defaultValues 同源，用于「未做任何修改时禁用保存，避免无意义交易」
+  const formDefaultValues = {
+    maxBuyBnb: initialMaxBuyBnb,
+    hardcap: initialHardcap,
+    softcap: initialSoftcap,
+    vestingDelayMinutes: initialVestingDelayMinutes,
+    vestingRate: token?.vestingRate ? Number(token.vestingRate) : 5,
+    creatorBuyTokens: token?.creatorBuyTokens
+      ? String(token.creatorBuyTokens)
+      : '0',
+    creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
+    durationHours: '1',
+  }
+
   const form = useForm({
-    defaultValues: {
-      maxBuyBnb: initialMaxBuyBnb,
-      hardcap: initialHardcap,
-      softcap: initialSoftcap,
-      vestingDelayMinutes: initialVestingDelayMinutes,
-      vestingRate: token?.vestingRate ? Number(token.vestingRate) : 5,
-      creatorBuyTokens: token?.creatorBuyTokens
-        ? String(token.creatorBuyTokens)
-        : '0',
-      creatorBuyBnb: token?.creatorBuyBnb ? String(token.creatorBuyBnb) : '',
-      startTime: '',
-      durationHours: '1',
-    },
+    defaultValues: formDefaultValues,
     onSubmit: async ({ value }) => {
       const hardcapNum = Number(value.hardcap || '0')
       const hardcapWei = parseEther(value.hardcap || '0')
       // 软顶取表单实际填写值（校验器已约束在硬顶的 50% ~ 100%）
       const softcapStr = value.softcap || '0'
       const softcapWei = parseEther(softcapStr)
+      const minSoftcapWei = (hardcapWei + 1n) / 2n
+      if (softcapWei < minSoftcapWei || softcapWei > hardcapWei) {
+        toast.error('软顶必须在硬顶的 50% 至 100% 之间')
+        return
+      }
       const minLiquidityWei = softcapWei // 自动对齐软顶
 
       const priceWei = calculatePresaleTokenPrice(hardcapWei, presaleShare)
@@ -223,13 +229,10 @@ export function PresaleForm({
         return
       }
 
-      // 开始时间：0 = 立即（链上语义）；后端与链上保持同口径传 0，
-      // 真实结束时间由后端解析 openPresale 交易后按链上 endTime 为准
-      const pickedStartSec = Number(value.startTime) || 0
-      if (!pickedStartSec || pickedStartSec <= Math.floor(Date.now() / 1000)) {
-        toast.error('开始时间必须晚于当前时间，请重新选择开始时间')
-        return
-      }
+      // 开始时间固定传 0 = 立即开始（链上语义）：不向用户暴露选择，
+      // openPresale 时以 max(当前时刻, startTime) 锚定 endTime，窗口不缩水；
+      // 后端与链上同口径存 0，真实结束时间以后端解析 openPresale 交易的链上 endTime 为准
+      const START_IMMEDIATELY_SEC = 0
 
       const creatorBuyTokensWei = parseEther(value.creatorBuyTokens || '0')
       let creatorBuyBnbWei = parseEther(value.creatorBuyBnb || '0')
@@ -288,7 +291,7 @@ export function PresaleForm({
               hardcap: hardcapWei,
               minLiquidityAmount: minLiquidityWei,
               softCap: softcapWei,
-              startTime: BigInt(pickedStartSec),
+              startTime: BigInt(START_IMMEDIATELY_SEC),
               duration: BigInt(durationSec),
               vestingDelay: vestingDelaySec,
               vestingRate: BigInt(Number(value.vestingRate || 5)),
@@ -325,8 +328,8 @@ export function PresaleForm({
           hardcap: value.hardcap,
           softcap: softcapStr,
           minLiquidityAmount: softcapStr,
-          startTime: pickedStartSec,
-          endTime: pickedStartSec > 0 ? pickedStartSec + durationSec : 0,
+          startTime: START_IMMEDIATELY_SEC,
+          endTime: 0,
           vestingDelay: Number(vestingDelaySec),
           vestingRate: Number(value.vestingRate) || 5,
           slippage: 0,
@@ -393,40 +396,64 @@ export function PresaleForm({
           validators={{
             onChangeListenTo: ['hardcap'],
             onChange: ({ value, fieldApi }) => {
-              const n = Number(value)
-              if (!value || Number.isNaN(n) || n <= 0)
+              if (!value) return '请输入大于 0 的软顶金额'
+
+              let softcapWei: bigint
+              let hardcapWei: bigint
+              try {
+                softcapWei = parseEther(value)
+                hardcapWei = parseEther(
+                  fieldApi.form.getFieldValue('hardcap') || '0',
+                )
+              } catch {
+                return '请输入有效的金额、硬顶和软顶'
+              }
+
+              if (softcapWei <= 0n)
                 return '请输入大于 0 的软顶金额'
-              const hardcap = Number(fieldApi.form.getFieldValue('hardcap'))
-              if (!Number.isFinite(hardcap) || hardcap <= 0)
+              if (hardcapWei <= 0n)
                 return '请先输入有效的硬顶金额'
-              // 合法区间：硬顶的 50% ~ 100%，可等于硬顶（0.0001 容差吸收浮点误差）
-              const minSoftcap = Number((hardcap * 0.5).toFixed(4))
-              if (n < minSoftcap - 0.0001)
-                return `软顶不能低于硬顶的 50%（当前硬顶 ${hardcap} BNB，软顶至少 ${minSoftcap} BNB）`
-              if (n > hardcap + 0.0001)
-                return `软顶不能超过硬顶（当前硬顶 ${hardcap} BNB）`
+
+              const minSoftcapWei = (hardcapWei + 1n) / 2n
+              if (softcapWei < minSoftcapWei)
+                return `软顶不能低于硬顶的 50%（当前硬顶 ${formatEther(hardcapWei)} BNB，软顶至少 ${formatEther(minSoftcapWei)} BNB）`
+              if (softcapWei > hardcapWei)
+                return `软顶不能超过硬顶（当前硬顶 ${formatEther(hardcapWei)} BNB）`
               return undefined
             },
           }}
         >
           {(field) => (
-              <FieldWrap label="软顶" required>
-
-              <UnitInput
-                id={field.name}
-                name={field.name}
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder=""
-                value={field.state.value}
-                onChange={(e) =>
-                  field.handleChange(sanitizeDecimalInput(e.target.value))
-                }
-                onBlur={field.handleBlur}
-                unit="BNB"
-              />
-              <FieldInfo field={field} />
-            </FieldWrap>
+            <form.Subscribe
+              selector={(state) =>
+                Boolean(state.fieldMeta.hardcap?.isBlurred)
+              }
+            >
+              {(hardcapIsBlurred) => (
+                <FieldWrap label="软顶" required>
+                  <UnitInput
+                    id={field.name}
+                    name={field.name}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder=""
+                    value={field.state.value}
+                    onChange={(e) =>
+                      field.handleChange(sanitizeDecimalInput(e.target.value))
+                    }
+                    onBlur={field.handleBlur}
+                    unit="BNB"
+                  />
+                  <FieldInfo
+                    field={field}
+                    showBeforeBlur={
+                      hardcapIsBlurred &&
+                      (Boolean(field.state.value) || field.state.meta.isTouched)
+                    }
+                  />
+                </FieldWrap>
+              )}
+            </form.Subscribe>
           )}
         </form.Field>
         <form.Field
@@ -475,21 +502,77 @@ export function PresaleForm({
           }}
         >
           {(field) => (
-            <FieldWrap label="单钱包认购上限" required>
+            <form.Subscribe
+              selector={(state) =>
+                Boolean(
+                  state.fieldMeta.hardcap?.isBlurred ||
+                    state.fieldMeta.softcap?.isBlurred,
+                )
+              }
+            >
+              {(dependencyIsBlurred) => (
+                <FieldWrap label="单钱包认购上限" required>
+                  <UnitInput
+                    id={field.name}
+                    name={field.name}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder=""
+                    value={field.state.value}
+                    onChange={(e) =>
+                      field.handleChange(sanitizeDecimalInput(e.target.value))
+                    }
+                    onBlur={field.handleBlur}
+                    unit="BNB"
+                  />
+                  <FieldInfo
+                    field={field}
+                    showBeforeBlur={
+                      dependencyIsBlurred &&
+                      (Boolean(field.state.value) || field.state.meta.isTouched)
+                    }
+                  />
+                </FieldWrap>
+              )}
+            </form.Subscribe>
+          )}
+        </form.Field>
+
+        <form.Field
+          name="durationHours"
+          validators={{
+            onChange: ({ value }) => {
+              const n = Number(value)
+              if (!value || Number.isNaN(n) || n <= 0) return '请输入认购时长'
+              const sec = hoursToSeconds(n)
+              if (sec < DURATION_MIN_SEC || sec > DURATION_MAX_SEC)
+                return '认购时长须在 1 至 90 小时之间'
+              return undefined
+            },
+          }}
+        >
+          {(field) => (
+            <FieldWrap
+              label="认购时长"
+              required
+            >
               <UnitInput
                 id={field.name}
                 name={field.name}
-                inputMode="decimal"
+                inputMode="numeric"
                 autoComplete="off"
                 placeholder=""
                 value={field.state.value}
                 onChange={(e) =>
-                  field.handleChange(sanitizeDecimalInput(e.target.value))
+                  field.handleChange(sanitizeIntInput(e.target.value))
                 }
                 onBlur={field.handleBlur}
-                unit="BNB"
+                unit="小时"
               />
               <FieldInfo field={field} />
+              <p className="mt-1 text-xs text-neutral-500">
+                认购时长须在 1 至 90 小时之间；开启认购后立即开始
+              </p>
             </FieldWrap>
           )}
         </form.Field>
@@ -575,74 +658,6 @@ export function PresaleForm({
             )
           }}
         </form.Subscribe>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <FormSectionTitle title="认购时间" required />
-
-        <form.Field
-          name="startTime"
-          validators={{
-            onChange: ({ value }) => {
-              const sec = Number(value)
-              if (!value || !Number.isFinite(sec) || sec <= 0)
-                return '请选择开始时间'
-              if (sec <= Math.floor(Date.now() / 1000))
-                return '开始时间必须晚于当前时间'
-              return undefined
-            },
-          }}
-        >
-          {(field) => (
-            <FieldWrap label="开始时间" required>
-              <StartTimePicker
-                value={field.state.value}
-                onChange={field.handleChange}
-                onBlur={field.handleBlur}
-              />
-              <FieldInfo field={field} />
-            </FieldWrap>
-          )}
-        </form.Field>
-
-        <form.Field
-          name="durationHours"
-          validators={{
-            onChange: ({ value }) => {
-              const n = Number(value)
-              if (!value || Number.isNaN(n) || n <= 0) return '请输入认购时长'
-              const sec = hoursToSeconds(n)
-              if (sec < DURATION_MIN_SEC || sec > DURATION_MAX_SEC)
-                return '认购时长须在 1 至 90 小时之间'
-              return undefined
-            },
-          }}
-        >
-          {(field) => (
-            <FieldWrap
-              label="认购时长"
-              required
-            >
-              <UnitInput
-                id={field.name}
-                name={field.name}
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder=""
-                value={field.state.value}
-                onChange={(e) =>
-                  field.handleChange(sanitizeIntInput(e.target.value))
-                }
-                onBlur={field.handleBlur}
-                unit="小时"
-              />
-              <FieldInfo field={field} />
-              <p className="mt-1 text-xs text-neutral-500">
-                认购时长须在 1 至 90 小时之间
-              </p>
-            </FieldWrap>
-          )}
-        </form.Field>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -806,19 +821,32 @@ export function PresaleForm({
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-t-white/10 bg-[#131516] p-4">
         <form.Subscribe
-          selector={(state) => ({
-            canSubmit:
-              state.canSubmit &&
-              Boolean(
-                state.values.hardcap &&
-                  state.values.softcap &&
-                  state.values.maxBuyBnb &&
-                  state.values.startTime &&
-                  Number(state.values.startTime) >
-                    Math.floor(Date.now() / 1000),
-              ),
-            isSubmitting: state.isSubmitting,
-          })}
+          selector={(state) => {
+            // 任一字段相对初始值有变化才可提交，避免未修改也发交易浪费 gas
+            const changed =
+              state.values.hardcap !== formDefaultValues.hardcap ||
+              state.values.softcap !== formDefaultValues.softcap ||
+              state.values.maxBuyBnb !== formDefaultValues.maxBuyBnb ||
+              state.values.durationHours !== formDefaultValues.durationHours ||
+              state.values.vestingDelayMinutes !==
+                formDefaultValues.vestingDelayMinutes ||
+              String(state.values.vestingRate) !==
+                String(formDefaultValues.vestingRate) ||
+              state.values.creatorBuyTokens !==
+                formDefaultValues.creatorBuyTokens ||
+              state.values.creatorBuyBnb !== formDefaultValues.creatorBuyBnb
+            return {
+              canSubmit:
+                state.canSubmit &&
+                Boolean(
+                  state.values.hardcap &&
+                    state.values.softcap &&
+                    state.values.maxBuyBnb,
+                ) &&
+                changed,
+              isSubmitting: state.isSubmitting,
+            }
+          }}
         >
           {({ canSubmit, isSubmitting }) => (
             <Web3ActionButton

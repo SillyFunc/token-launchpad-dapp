@@ -220,7 +220,6 @@ export function TokenCard({
     presaleConfigured,
     presaleEnabled,
     presaleStatus,
-    presaleRound,
     tokensClaimed,
     bnbAccumulated,
     tokensSubscribed,
@@ -439,6 +438,8 @@ export function TokenCard({
         functionName: 'endPresale',
         account: userAddress,
         chainId: DEFAULT_CHAIN_ID,
+        // 合约实测约 28k，留足余量以绕过钱包节点偶发的错误估算。
+        gas: 80_000n,
       })
       queryClient.invalidateQueries()
       toast.success(
@@ -558,12 +559,12 @@ export function TokenCard({
         functionName: 'relaunchPresale',
         account,
         chainId: DEFAULT_CHAIN_ID,
-        // 合约实测约 24k，留足余量以绕过钱包节点偶发的错误估算。
         gas: 80_000n,
       })
       queryClient.invalidateQueries()
-      toast.success('预售状态已成功重置！正在前往重开预售界面配置条款…')
-      navigate(`/represale?id=${token.id}&address=${tokenAddress}`)
+      navigate(`/represale?id=${token.id}&address=${tokenAddress}`, {
+        state: { relaunched: true },
+      })
     } catch (err: unknown) {
       toast.error(
         parseContractError(err, '重置预售状态失败，请稍后重试'),
@@ -964,35 +965,17 @@ export function TokenCard({
 
             case 'open_presale':
               return (
-                <>
-                  {presaleRound > 0 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="default"
-                      onClick={() => {
-                        navigate(
-                          `/represale?id=${token.id}&address=${tokenAddress}`,
-                        )
-                      }}
-                      className="rounded border-[#484b51] bg-[#1a1c1e] text-xs font-semibold text-neutral-200 hover:bg-white/10 cursor-pointer"
-                    >
-                      <Edit3 className="size-4 mr-1" />
-                      <span>配置预售条款</span>
-                    </Button>
-                  )}
-                  <Web3ActionButton
-                    type="button"
-                    size="default"
-                    onAction={handleOpenPresale}
-                    loading={isOpeningPresale}
-                    loadingText="开启中…"
-                    className="cursor-pointer border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
-                  >
-                    <Rocket className="size-4 mr-1" />
-                    <span>开启预售</span>
-                  </Web3ActionButton>
-                </>
+                <Web3ActionButton
+                  type="button"
+                  size="default"
+                  onAction={handleOpenPresale}
+                  loading={isOpeningPresale}
+                  loadingText="开启中…"
+                  className="cursor-pointer border-transparent bg-linear-to-r from-[#FE810B] via-[#FFA546] to-[#FE810B] font-bold text-white transition-transform active:translate-y-0.5"
+                >
+                  <Rocket className="size-4 mr-1" />
+                  <span>开启预售</span>
+                </Web3ActionButton>
               )
 
             case 'end_presale':

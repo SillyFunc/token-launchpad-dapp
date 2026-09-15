@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { type Address, formatUnits } from 'viem'
 
 import {
@@ -7,8 +7,6 @@ import {
   getWatchClient,
   getPairToken0,
   pairAbi,
-  readStoredBaseline,
-  storeBaseline,
   type PricingResult,
 } from '@/lib/pricing'
 
@@ -17,6 +15,8 @@ export interface TokenPriceData {
   mcapBNB: number | null
   stage: PricingResult['stage']
   changePercent: number | null
+  /** 用于第三方行情页定位市场的 Pancake V2 Pair 地址。 */
+  pairAddress: PricingResult['pair']
 }
 
 export function useTokenPrice(
@@ -24,7 +24,6 @@ export function useTokenPrice(
   totalSupply: bigint | undefined,
 ): TokenPriceData {
   const [result, setResult] = useState<PricingResult | null>(null)
-  const baselineRef = useRef<number | null>(null)
 
   // 初始获取 + Sync 订阅
   useEffect(() => {
@@ -83,48 +82,35 @@ export function useTokenPrice(
     }
   }, [tokenAddr])
 
-  // 解析涨幅基准价：预售发行价优先，否则用首次记录的 live 价格
-  useEffect(() => {
-    if (
-      baselineRef.current !== null ||
-      !tokenAddr ||
-      !result ||
-      result.stage !== 'live' ||
-      result.priceBNB === null ||
-      result.priceBNB <= 0
-    ) {
-      return
-    }
-
-    if (result.baselinePriceBNB && result.baselinePriceBNB > 0) {
-      baselineRef.current = result.baselinePriceBNB
-      return
-    }
-
-    const stored = readStoredBaseline(tokenAddr)
-    if (stored !== null) {
-      baselineRef.current = stored
-    } else {
-      storeBaseline(tokenAddr, result.priceBNB)
-      baselineRef.current = result.priceBNB
-    }
-  }, [result, tokenAddr])
-
   if (!result || !totalSupply) {
-    return { priceBNB: null, mcapBNB: null, stage: 'not_launched', changePercent: null }
+    return {
+      priceBNB: null,
+      mcapBNB: null,
+      stage: 'not_launched',
+      changePercent: null,
+      pairAddress: result?.pair ?? null,
+    }
   }
 
   const priceBNB = result.priceBNB
   const mcapBNB =
     priceBNB !== null ? priceBNB * Number(formatUnits(totalSupply, 18)) : null
 
-  const baseline = baselineRef.current
+  // 涨幅严格以预售价为基准；没有预售价的代币不显示涨幅，避免使用本地首次访问价格。
+  const baseline = result.baselinePriceBNB
   const changePercent =
+    result.stage === 'live' &&
     baseline !== null &&
     baseline > 0 &&
     priceBNB !== null
       ? ((priceBNB - baseline) / baseline) * 100
       : null
 
-  return { priceBNB, mcapBNB, stage: result.stage, changePercent }
+  return {
+    priceBNB,
+    mcapBNB,
+    stage: result.stage,
+    changePercent,
+    pairAddress: result.pair,
+  }
 }

@@ -14,7 +14,6 @@ import { Calculator, Coins } from 'lucide-react'
 import type { TokenDetail } from '@/api/token'
 import { updateTokenInfo } from '@/api/token'
 import { requestAuthSignature } from '@/api/auth'
-import { StartTimePicker } from '@/components/presale/start-time-picker'
 import { FormSectionTitle } from '@/components/common/form-section-title'
 import { FieldInfo } from '@/components/common/field-info'
 import { Web3ActionButton } from '@/components/common/web3-action-button'
@@ -162,18 +161,19 @@ export function RepresaleForm({
           (gate.onchainMaxBuy * gate.onchainPresalePrice) / 10n ** 18n,
         )
       : ''
-  const previousStartTimeSec = Number(gate.presaleStartTime ?? 0n)
+
+  // 初始表单值：与 defaultValues 同源，用于「未做任何修改时禁用保存，避免无意义交易」
+  const formDefaultValues = {
+    hardcap: initialHardcap,
+    softcap: initialSoftcap,
+    maxBuyBnb: initialMaxBuyBnb,
+    durationHours: initialDurationHours,
+    vestingDelayMinutes: initialVestingMinutes,
+    vestingRate: Number(gate.vestingRate) || 5,
+  }
 
   const form = useForm({
-    defaultValues: {
-      hardcap: initialHardcap,
-      softcap: initialSoftcap,
-      maxBuyBnb: initialMaxBuyBnb,
-      startTime: '',
-      durationHours: initialDurationHours,
-      vestingDelayMinutes: initialVestingMinutes,
-      vestingRate: Number(gate.vestingRate) || 5,
-    },
+    defaultValues: formDefaultValues,
     onSubmit: async ({ value }) => {
       if (submitInFlightRef.current) return
       submitInFlightRef.current = true
@@ -228,16 +228,9 @@ export function RepresaleForm({
           throw new Error('释放周期须在 5 至 30 分钟之间')
         if (!token?.id) throw new Error('未获取到代币 ID，无法同步预售数据')
 
-        const startTimeSec = Number(value.startTime || 0)
-        if (!startTimeSec || startTimeSec <= Math.floor(Date.now() / 1000)) {
-          throw new Error('开始时间必须晚于当前时间，请重新选择开始时间')
-        }
-        if (
-          previousStartTimeSec > 0 &&
-          startTimeSec <= previousStartTimeSec
-        ) {
-          throw new Error('重开预售的开始时间必须晚于上一轮预售开始时间')
-        }
+        // 开始时间固定传 0 = 立即开始（链上语义）：不向用户暴露选择，
+        // openPresale 时以 max(当前时刻, startTime) 锚定 endTime，窗口不缩水
+        const START_IMMEDIATELY_SEC = 0
 
         const slippageBps =
           (onchainSlippage as bigint | undefined) !== undefined &&
@@ -281,7 +274,7 @@ export function RepresaleForm({
               hardcap: hardcapWei,
               minLiquidityAmount: softcapWei,
               softCap: softcapWei,
-              startTime: BigInt(startTimeSec),
+              startTime: BigInt(START_IMMEDIATELY_SEC),
               duration: BigInt(durationSec),
               vestingDelay: vestingDelaySec,
               vestingRate: BigInt(Number(value.vestingRate)),
@@ -313,13 +306,24 @@ export function RepresaleForm({
           hardcap: value.hardcap,
           softcap: value.softcap,
           minLiquidityAmount: value.softcap,
-          startTime: startTimeSec,
-          endTime: startTimeSec > 0 ? startTimeSec + durationSec : 0,
+          startTime: START_IMMEDIATELY_SEC,
+          endTime: 0,
           vestingDelay: Number(vestingDelaySec),
           vestingRate: Number(value.vestingRate),
           slippage: Number(slippageBps),
           ...auth,
         })
+
+        // 标记本轮修改机会已用完（键与 represale 页面守卫一致：预售合约 + 轮次）；
+        // 此后浏览器后退 / 直达 URL 均会被守卫拦截，只能沿用已保存条款
+        try {
+          localStorage.setItem(
+            `represale-edit-consumed:${presaleAddress.toLowerCase()}:${String(gate.presaleRound)}`,
+            String(Date.now()),
+          )
+        } catch {
+          // 隐私模式等写入失败不阻断主流程；导航 state 守卫仍拦截直接 URL 进入
+        }
 
         toast.success('预售条款已更新，请在控制台开启新一轮预售')
         onSuccess()
@@ -395,50 +399,35 @@ export function RepresaleForm({
           }}
         >
           {(field) => (
-            <FieldWrap label="软顶" required>
-              <UnitInput
-                inputMode="decimal"
-                autoComplete="off"
-                value={field.state.value}
-                onChange={(event) =>
-                  field.handleChange(sanitizeDecimal(event.target.value))
-                }
-                onBlur={field.handleBlur}
-                unit="BNB"
-              />
-              <FieldInfo field={field} />
-            </FieldWrap>
+            <form.Subscribe
+              selector={(state) =>
+                Boolean(state.fieldMeta.hardcap?.isBlurred)
+              }
+            >
+              {(hardcapIsBlurred) => (
+                <FieldWrap label="软顶" required>
+                  <UnitInput
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={field.state.value}
+                    onChange={(event) =>
+                      field.handleChange(sanitizeDecimal(event.target.value))
+                    }
+                    onBlur={field.handleBlur}
+                    unit="BNB"
+                  />
+                  <FieldInfo
+                    field={field}
+                    showBeforeBlur={
+                      hardcapIsBlurred &&
+                      (Boolean(field.state.value) || field.state.meta.isTouched)
+                    }
+                  />
+                </FieldWrap>
+              )}
+            </form.Subscribe>
           )}
         </form.Field>
-
-        <form.Subscribe selector={(state) => state.values.hardcap}>
-          {(hardcap) => {
-            let priceText = ''
-            try {
-              const priceWei = calculatePresaleTokenPrice(
-                parseEther(hardcap || '0'),
-                (maxPresaleTokens as bigint | undefined) ?? 0n,
-              )
-              priceText = priceWei ? formatEther(priceWei) : ''
-            } catch {
-              priceText = ''
-            }
-
-            return (
-              <FieldWrap label="预售价格（自动计算）" required>
-                <UnitInput
-                  readOnly
-                  value={priceText}
-                  placeholder="填写硬顶后自动计算"
-                  unit="BNB/枚"
-                />
-                <p className="mt-1 text-xs text-neutral-500">
-                  单价 = 向上取整（硬顶 ÷ 本轮预售总量），售罄募集金额不低于硬顶
-                </p>
-              </FieldWrap>
-            )
-          }}
-        </form.Subscribe>
 
         <form.Field
           name="maxBuyBnb"
@@ -480,112 +469,39 @@ export function RepresaleForm({
           }}
         >
           {(field) => (
-            <FieldWrap label="单钱包认购上限" required>
-              <UnitInput
-                inputMode="decimal"
-                autoComplete="off"
-                value={field.state.value}
-                onChange={(event) =>
-                  field.handleChange(sanitizeDecimal(event.target.value))
-                }
-                onBlur={field.handleBlur}
-                unit="BNB"
-              />
-              <FieldInfo field={field} />
-            </FieldWrap>
-          )}
-        </form.Field>
-
-        <form.Subscribe selector={(state) => state.values.hardcap}>
-          {(hardcap) => {
-            let maxRaise = '--'
-            try {
-              const maxPresaleTokensWei = maxPresaleTokens as bigint | undefined
-              const priceWei = calculatePresaleTokenPrice(
-                parseEther(hardcap || '0'),
-                maxPresaleTokensWei ?? 0n,
-              )
-              if (priceWei && maxPresaleTokensWei) {
-                maxRaise = formatEther(
-                  (priceWei * maxPresaleTokensWei) / 10n ** 18n,
+            <form.Subscribe
+              selector={(state) =>
+                Boolean(
+                  state.fieldMeta.hardcap?.isBlurred ||
+                    state.fieldMeta.softcap?.isBlurred,
                 )
               }
-            } catch {
-              maxRaise = '--'
-            }
-            return (
-              <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#181a1d] px-3.5 py-1 text-xs">
-                <div className="flex h-10 items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Coins className="size-3.5 shrink-0 text-[#FFA546]" />
-                    <span className="text-xs font-medium leading-none text-neutral-200">
-                      预售总量
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-1 text-right">
-                    <span className="font-mono text-sm font-bold text-white">
-                      {maxPresaleTokens === undefined
-                        ? '--'
-                        : formatEther(maxPresaleTokens as bigint)}
-                    </span>
-                    <span className="text-xs text-neutral-400">枚</span>
-                  </div>
-                </div>
-                <div className="flex h-10 items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Calculator className="size-3.5 shrink-0 text-[#FFA546]" />
-                    <span className="text-xs font-medium leading-none text-neutral-200">
-                      按当前价格售罄募集
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-1 text-right">
-                    <span className="font-mono text-sm font-bold text-[#FFA546]">
-                      {maxRaise}
-                    </span>
-                    <span className="text-xs text-neutral-400">BNB</span>
-                  </div>
-                </div>
-                <p className="py-2 text-xs text-neutral-500">
-                  硬顶：{hardcap || '--'} BNB
-                </p>
-              </div>
-            )
-          }}
-        </form.Subscribe>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <FormSectionTitle title="认购时间" required />
-        <form.Field
-          name="startTime"
-          validators={{
-            onChange: ({ value }) => {
-              const sec = Number(value)
-              if (!value || isNaN(sec) || sec <= 0) return '请选择开始时间'
-              if (sec <= Math.floor(Date.now() / 1000))
-                return '开始时间必须晚于当前时间'
-              if (previousStartTimeSec > 0 && sec <= previousStartTimeSec)
-                return '重开预售的开始时间必须晚于上一轮预售开始时间'
-              return undefined
-            },
-          }}
-        >
-          {(field) => (
-            <FieldWrap label="开始时间" required>
-              <StartTimePicker
-                value={field.state.value}
-                onChange={field.handleChange}
-                onBlur={field.handleBlur}
-                minTimestamp={
-                  previousStartTimeSec > 0
-                    ? previousStartTimeSec
-                    : undefined
-                }
-              />
-              <FieldInfo field={field} />
-            </FieldWrap>
+            >
+              {(dependencyIsBlurred) => (
+                <FieldWrap label="单钱包认购上限" required>
+                  <UnitInput
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={field.state.value}
+                    onChange={(event) =>
+                      field.handleChange(sanitizeDecimal(event.target.value))
+                    }
+                    onBlur={field.handleBlur}
+                    unit="BNB"
+                  />
+                  <FieldInfo
+                    field={field}
+                    showBeforeBlur={
+                      dependencyIsBlurred &&
+                      (Boolean(field.state.value) || field.state.meta.isTouched)
+                    }
+                  />
+                </FieldWrap>
+              )}
+            </form.Subscribe>
           )}
         </form.Field>
+
         <form.Field
           name="durationHours"
           validators={{
@@ -613,11 +529,62 @@ export function RepresaleForm({
               />
               <FieldInfo field={field} />
               <p className="mt-1 text-xs text-neutral-500">
-                认购时长须在 1 至 90 小时之间
+                认购时长须在 1 至 90 小时之间；开启认购后立即开始
               </p>
             </FieldWrap>
           )}
         </form.Field>
+
+        <form.Subscribe selector={(state) => state.values.hardcap}>
+          {(hardcap) => {
+            const priceText = (() => {
+              try {
+                const priceWei = calculatePresaleTokenPrice(
+                  parseEther(hardcap || '0'),
+                  (maxPresaleTokens as bigint | undefined) ?? 0n,
+                )
+                return priceWei ? formatEther(priceWei) : ''
+              } catch {
+                return ''
+              }
+            })()
+
+            return (
+              <div className="flex flex-col divide-y divide-white/5 border border-[#2F3737] bg-[#181a1d] px-3.5 py-1 text-xs">
+                <div className="flex h-10 items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Coins className="size-3.5 shrink-0 text-[#FFA546]" />
+                    <span className="text-xs font-medium leading-none text-neutral-200">
+                      预售总量
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1 text-right">
+                    <span className="font-mono text-sm font-bold text-white">
+                      {maxPresaleTokens === undefined
+                        ? '--'
+                        : formatEther(maxPresaleTokens as bigint)}
+                    </span>
+                    <span className="text-xs text-neutral-400">枚</span>
+                  </div>
+                </div>
+                <div className="flex h-10 items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Calculator className="size-3.5 shrink-0 text-[#FFA546]" />
+                    <span className="text-xs font-medium leading-none text-neutral-200">
+                      预售价格
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1 text-right">
+                    <span className="font-mono text-sm font-bold text-[#FFA546]">
+                      {priceText || '--'}
+                    </span>
+                    <span className="text-xs text-neutral-400">BNB/枚</span>
+                  </div>
+                </div>
+              </div>
+            )
+          }}
+        </form.Subscribe>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -709,25 +676,33 @@ export function RepresaleForm({
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-t-white/10 bg-[#131516] p-4">
-        <div className="mx-auto flex w-full max-w-5xl flex-col  items-center justify-between gap-3">
-    
-
+        <div className="mx-auto flex w-full flex-col  items-center justify-between gap-3">
           <div className="w-full  ml-auto">
             <form.Subscribe
-              selector={(state) => ({
-                canSubmit:
-                  state.canSubmit &&
-                  Boolean(
-                    state.values.hardcap &&
-                    state.values.softcap &&
-                    state.values.maxBuyBnb &&
-                    state.values.startTime &&
-                    Number(state.values.startTime) >
-                      Math.floor(Date.now() / 1000) &&
-                    Number(state.values.startTime) > previousStartTimeSec,
-                  ),
-                isSubmitting: state.isSubmitting || Boolean(submitStep),
-              })}
+              selector={(state) => {
+                // 任一字段相对初始值有变化才可提交，避免未修改也发交易浪费 gas
+                const changed =
+                  state.values.hardcap !== formDefaultValues.hardcap ||
+                  state.values.softcap !== formDefaultValues.softcap ||
+                  state.values.maxBuyBnb !== formDefaultValues.maxBuyBnb ||
+                  state.values.durationHours !==
+                    formDefaultValues.durationHours ||
+                  state.values.vestingDelayMinutes !==
+                    formDefaultValues.vestingDelayMinutes ||
+                  String(state.values.vestingRate) !==
+                    String(formDefaultValues.vestingRate)
+                return {
+                  canSubmit:
+                    state.canSubmit &&
+                    Boolean(
+                      state.values.hardcap &&
+                        state.values.softcap &&
+                        state.values.maxBuyBnb,
+                    ) &&
+                    changed,
+                  isSubmitting: state.isSubmitting || Boolean(submitStep),
+                }
+              }}
             >
               {({ canSubmit, isSubmitting }) => (
                 <Web3ActionButton

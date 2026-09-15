@@ -13,6 +13,7 @@ const navItems = [
   { name: '首页', path: '/board' },
   { name: '发射', path: '/launch' },
   { name: '控制台', path: '/dashboard' },
+  { name: '我的认购', path: '/subscription' },
   // { name: '我的', path: '/me' },
 ]
 

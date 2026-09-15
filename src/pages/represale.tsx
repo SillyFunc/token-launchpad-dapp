@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useConnection } from 'wagmi'
 import { isAddress, type Hex } from 'viem'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams, useLocation } from 'react-router'
 
 import { getTokenByContractAddress, getTokenDetailById } from '@/api/token'
 import { BlockedState } from '@/components/presale/blocked-state'
@@ -47,6 +47,21 @@ export function Represale() {
       gate.bnbAccumulated === 0n,
   )
 
+  // 「重开后仅允许修改一次条款」双重判定：
+  // 1. 必须经重开交易成功后的自动跳转进入（导航 state.relaunched）——直达 URL / 退出后重进均视为放弃；
+  // 2. 本轮未保存过条款（localStorage 按 预售合约+轮次 标记）——拦截保存成功后浏览器后退再改。
+  const location = useLocation()
+  const fromRelaunch =
+    (location.state as { relaunched?: unknown } | null)?.relaunched === true
+  const editConsumedKey =
+    gate.presaleAddress && gate.presaleRound !== undefined
+      ? `represale-edit-consumed:${gate.presaleAddress.toLowerCase()}:${String(gate.presaleRound)}`
+      : null
+  const editConsumed = Boolean(
+    editConsumedKey && localStorage.getItem(editConsumedKey),
+  )
+  const canEditOnce = canRepresale && fromRelaunch && !editConsumed
+
   let blockedReason = '当前代币不满足重开预售条件'
   if (!address) blockedReason = '请先连接创建者钱包'
   else if (gate.presaleStatus === 4 && gate.bnbAccumulated > 0n) {
@@ -58,6 +73,11 @@ export function Represale() {
     gate.presaleStatus !== 0
   ) {
     blockedReason = '当前代币状态不可重开预售（仅发行失败或新轮配置期可操作）'
+  } else if (canRepresale && editConsumed) {
+    blockedReason = '本轮预售条款已修改过，将沿用该条款，请直接开启预售'
+  } else if (canRepresale && !fromRelaunch) {
+    blockedReason =
+      '条款修改机会仅限重开预售后的一次；已离开修改界面视为放弃，将沿用上一轮预售条款'
   }
 
   return (
@@ -84,15 +104,17 @@ export function Represale() {
           />
         </CardHeader>
         <CardContent>
-          {canRepresale && gate.presaleAddress && address ? (
-            <RepresaleForm
-              key={`${effectiveAddress}-${gate.presaleAddress}`}
-              token={token ?? null}
-              presaleAddress={gate.presaleAddress}
-              address={address as Hex}
-              gate={gate}
-              onSuccess={() => navigate('/dashboard')}
-            />
+          {canEditOnce && gate.presaleAddress && address ? (
+            <>
+              <RepresaleForm
+                key={`${effectiveAddress}-${gate.presaleAddress}`}
+                token={token ?? null}
+                presaleAddress={gate.presaleAddress}
+                address={address as Hex}
+                gate={gate}
+                onSuccess={() => navigate('/dashboard')}
+              />
+            </>
           ) : (
             <BlockedState
               title="暂不能重开预售"
